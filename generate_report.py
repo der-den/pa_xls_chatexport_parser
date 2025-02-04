@@ -6,11 +6,12 @@ from reportlab.pdfbase.ttfonts import TTFont
 from datetime import datetime
 from pathlib import Path
 import re
+from PIL import Image
+import os
 
 # Read the Excel file
 excel_file = 'sample/Report.xlsx'
 df = pd.read_excel(excel_file, na_values=[''], keep_default_na=False)
-
 
 # Find the highest message number (total message count)
 message_numbers = []
@@ -33,6 +34,7 @@ class ChatReport:
         self.margin = 50
         self.y_position = self.page_height - self.margin
         self.line_height = 15
+        self.max_image_height = 120  # Maximum height for embedded images
         
         # Register fonts
         font_path = Path(__file__).parent / 'fonts'
@@ -69,11 +71,19 @@ class ChatReport:
         is_owner = message_data.get('is_owner', False)
         is_read = str(message_data.get('Status', ''))
         read_status = "✔️ Read" if "read" in is_read.lower() else ""
+        attachment = str(message_data.get('attachment', ''))
         
+        # Only print if we have an image attachment
+        if attachment and attachment != 'nan' and self.is_image_file(attachment):
+            print(f"Found image attachment: {attachment}")
+            
         # Calculate positions
         left_col = self.margin
         middle_col = self.margin + 100
         right_col = self.page_width - self.margin - 100
+        
+        # Handle message content
+        y_offset = 0
         
         if is_owner:
             # Left: sender name and timestamp
@@ -83,83 +93,154 @@ class ChatReport:
             canvas.drawString(left_col, self.y_position - 10, timestamp)
             
             # Middle: message with emoji support
-            words = message_body.split()
-            line = []
-            current_line = ""
-            y_offset = 0
-            
-            for word in words:
-                test_line = current_line + " " + word if current_line else word
-                # Calculate width using both fonts
-                canvas.setFont('DejaVuSans', 10)
-                width = 0
-                for char in test_line:
-                    if self.is_emoji(char):
-                        canvas.setFont('SegoeEmoji', 10)
-                    else:
-                        canvas.setFont('DejaVuSans', 10)
-                    width += canvas.stringWidth(char, canvas._fontname, 10)
+            if message_body and message_body != 'nan':
+                words = message_body.split()
+                current_line = ""
                 
-                if width > 200:
-                    # Draw current line
+                for word in words:
+                    test_line = current_line + " " + word if current_line else word
+                    width = self.calculate_text_width(canvas, test_line)
+                    
+                    if width > 200:
+                        self.draw_text_with_emojis(canvas, current_line, middle_col, self.y_position - y_offset)
+                        current_line = word
+                        y_offset += 12
+                    else:
+                        current_line = test_line
+                
+                if current_line:
                     self.draw_text_with_emojis(canvas, current_line, middle_col, self.y_position - y_offset)
-                    current_line = word
                     y_offset += 12
-                else:
-                    current_line = test_line
             
-            if current_line:
-                self.draw_text_with_emojis(canvas, current_line, middle_col, self.y_position - y_offset)
+            # Handle attachment
+            if attachment and attachment != 'nan':
+                if self.is_image_file(attachment):
+                    # Add some spacing before image
+                    y_offset += 5
+                    image_height = self.embed_image(canvas, attachment, middle_col, self.y_position - y_offset, self.max_image_height)
+                    if image_height > 0:
+                        y_offset += image_height + 5
+                else:
+                    # Display attachment name in smaller font
+                    canvas.setFont('DejaVuSans', 8)
+                    canvas.drawString(middle_col, self.y_position - y_offset, f"📎 {attachment}")
+                    y_offset += 10
             
             # Right: read status
             canvas.setFont('SegoeEmoji', 8)
             canvas.drawString(right_col, self.y_position, read_status)
-            
-            self.y_position -= max(24, y_offset + 12)
         else:
+            # Similar structure for non-owner messages
             # Left: read status
             canvas.setFont('SegoeEmoji', 8)
             canvas.drawString(left_col, self.y_position, read_status)
             
             # Middle: message with emoji support
-            words = message_body.split()
-            line = []
-            current_line = ""
-            y_offset = 0
-            
-            for word in words:
-                test_line = current_line + " " + word if current_line else word
-                # Calculate width using both fonts
-                canvas.setFont('DejaVuSans', 10)
-                width = 0
-                for char in test_line:
-                    if self.is_emoji(char):
-                        canvas.setFont('SegoeEmoji', 10)
-                    else:
-                        canvas.setFont('DejaVuSans', 10)
-                    width += canvas.stringWidth(char, canvas._fontname, 10)
+            if message_body and message_body != 'nan':
+                words = message_body.split()
+                current_line = ""
                 
-                if width > 200:
-                    # Draw current line
+                for word in words:
+                    test_line = current_line + " " + word if current_line else word
+                    width = self.calculate_text_width(canvas, test_line)
+                    
+                    if width > 200:
+                        self.draw_text_with_emojis(canvas, current_line, middle_col, self.y_position - y_offset)
+                        current_line = word
+                        y_offset += 12
+                    else:
+                        current_line = test_line
+                
+                if current_line:
                     self.draw_text_with_emojis(canvas, current_line, middle_col, self.y_position - y_offset)
-                    current_line = word
                     y_offset += 12
-                else:
-                    current_line = test_line
             
-            if current_line:
-                self.draw_text_with_emojis(canvas, current_line, middle_col, self.y_position - y_offset)
+            # Handle attachment
+            if attachment and attachment != 'nan':
+                if self.is_image_file(attachment):
+                    # Add some spacing before image
+                    y_offset += 5
+                    image_height = self.embed_image(canvas, attachment, middle_col, self.y_position - y_offset, self.max_image_height)
+                    if image_height > 0:
+                        y_offset += image_height + 5
+                else:
+                    # Display attachment name in smaller font
+                    canvas.setFont('DejaVuSans', 8)
+                    canvas.drawString(middle_col, self.y_position - y_offset, f"📎 {attachment}")
+                    y_offset += 10
             
             # Right: sender name and timestamp
             canvas.setFont('DejaVuSans', 10)
             canvas.drawString(right_col, self.y_position, sender_name)
             canvas.setFont('DejaVuSans', 6)
             canvas.drawString(right_col, self.y_position - 10, timestamp)
-            
-            self.y_position -= max(24, y_offset + 12)
-            
+        
+        # Update y_position with the maximum offset used
+        self.y_position -= max(24, y_offset + 12)
         # Add some spacing between messages
         self.y_position -= 5
+
+    def is_image_file(self, filename):
+        """Check if the filename has an image extension."""
+        if not filename:
+            return False
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}
+        return Path(filename).suffix.lower() in image_extensions
+
+    def embed_image(self, canvas, image_path, x, y, max_height):
+        """Embed an image in the PDF with maximum height constraint."""
+        try:
+            if not os.path.exists(image_path):
+                return 0  # Return 0 height if image doesn't exist
+                
+            img = Image.open(image_path)
+            img_width, img_height = img.size
+            
+            # Calculate new dimensions maintaining aspect ratio
+            aspect = img_width / img_height
+            new_height = min(max_height, img_height)
+            new_width = new_height * aspect
+            
+            # Draw the image
+            canvas.drawImage(image_path, x, y - new_height, width=new_width, height=new_height)
+            return new_height
+        except Exception as e:
+            print(f"Error embedding image {image_path}: {e}")
+            return 0
+
+    def calculate_text_width(self, canvas, text):
+        """Calculate the width of text considering emojis."""
+        width = 0
+        for char in text:
+            if self.is_emoji(char):
+                canvas.setFont('SegoeEmoji', 10)
+            else:
+                canvas.setFont('DejaVuSans', 10)
+            width += canvas.stringWidth(char, canvas._fontname, 10)
+        return width
+
+    def add_participants_header(self, canvas, participants_data):
+        # Set initial position at the top of the page
+        self.y_position = self.page_height - self.margin
+        
+        # Add title
+        canvas.setFont('DejaVuSans', 14)
+        canvas.drawString(self.margin, self.y_position, "Chat Participants:")
+        self.y_position -= self.line_height * 2
+        
+        # Add participants
+        canvas.setFont('DejaVuSans', 10)
+        for participant in participants_data:
+            name = participant.get('sender_name', '')
+            is_owner = participant.get('is_owner', False)
+            participant_text = f"{name} {'(OWNER)' if is_owner else ''}"
+            canvas.drawString(self.margin + 20, self.y_position, participant_text)
+            self.y_position -= self.line_height
+        
+        # Add separator line
+        self.y_position -= self.line_height
+        canvas.line(self.margin, self.y_position, self.page_width - self.margin, self.y_position)
+        self.y_position -= self.line_height * 2
 
 def generate_chat_report(excel_file, output_file):
     # Read the Excel file
@@ -168,7 +249,6 @@ def generate_chat_report(excel_file, output_file):
     # Create PDF
     c = canvas.Canvas(output_file, pagesize=A4)
     report = ChatReport()
-    report.new_page(c)
     
     # Process the data to find owner and participants
     participants_dict = {}
@@ -199,32 +279,41 @@ def generate_chat_report(excel_file, output_file):
                         'message_direction': str(row.iloc[6]).strip()  # Direction column
                     }
 
-    # Second pass: identify the owner
-    owner_name = None
+    # Second pass: identify the owner and collect attachments
+    image_attachments = []  # Keep track of all image attachments
     for _, row in df.iloc[1:].iterrows():
-        message = str(row.iloc[2]).strip()  # Message content
         sender = str(row.iloc[1]).strip()
         direction = str(row.iloc[6]).strip().lower()
+        attachment = str(row.iloc[25]).strip()  # Attachment #1 is in column 25
+        
+        if attachment and attachment != 'nan':
+            if Path(attachment).suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}:
+                image_attachments.append(attachment)
         
         if sender and sender != 'System Message System Message':
             chat_id, _ = parse_participant(sender)
             if chat_id and chat_id in participants_dict:
                 # Check if this is an outgoing message
                 if direction == 'outgoing':
-                    owner_name = participants_dict[chat_id]['name']
-                    print(f"Found owner based on outgoing message: {owner_name}")
-                    # leave the loop
+                    participants_dict[chat_id]['is_owner'] = True
                     break
 
-    # Print debug information about owner detection
-    print("\nParticipant Analysis:")
-    for chat_id, info in participants_dict.items():
-        owner_status = "[OWNER]" if info['is_owner'] else ""
-        print(f"Chat ID: {chat_id}, Name: {info['name']}, Direction: {info.get('message_direction', 'Unknown')}, {owner_status}")
-
-    # Convert participants dictionary to list for PDF
-    report.participants = sorted(participants_dict.values(), key=lambda x: (not x['is_owner'], x['name']))
-
+    if image_attachments:
+        print(f"\nFound {len(image_attachments)} image attachments in chat:")
+        for img in image_attachments:
+            print(f"- {img}")
+    
+    # Convert participants_dict to list for header
+    participants = []
+    for info in participants_dict.values():
+        participants.append({
+            'sender_name': info['name'],
+            'is_owner': info['is_owner']
+        })
+    
+    # Add participants header
+    report.add_participants_header(c, participants)
+    
     # Process the messages
     messages = []
     for _, row in df.iloc[1:].iterrows():
@@ -235,10 +324,10 @@ def generate_chat_report(excel_file, output_file):
             # Get body content first
             body_content = str(row.iloc[8]).strip()  # Body is in column 8
             status = str(row.iloc[9]).strip()  # Status is in column 9
+            attachment = str(row.iloc[25]).strip()  # Attachment #1 is in column 25
             
             # Check for attachment if body is empty
             if body_content == 'nan' or not body_content:
-                attachment = str(row.iloc[25]).strip()  # Attachment #1 is in column 25
                 if attachment != 'nan' and attachment:
                     body_content = f"📎 {attachment}"
                 else:
@@ -264,7 +353,8 @@ def generate_chat_report(excel_file, output_file):
                 'body': body_content,
                 'timestamp': timestamp,
                 'is_owner': is_owner,
-                'Status': status
+                'Status': status,
+                'attachment': attachment
             }
             
             messages.append(message_data)
