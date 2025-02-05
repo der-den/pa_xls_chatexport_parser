@@ -11,12 +11,19 @@ import os
 import argparse
 import sys
 
+# Global counters
+attachment_not_found_counter = 0
+attachment_found_counter = 0
+
 def find_attachment_file(excel_path, attachment_name):
     """
     Search for an attachment file in the 'files' directory parallel to the Excel file.
     Returns the full path if found, None otherwise.
     """
-    print(f"Searching for attachment: {attachment_name}")
+    global attachment_not_found_counter
+    global attachment_found_counter
+    
+    #print(f"Searching for attachment: {attachment_name}")
     if not attachment_name or attachment_name == 'nan':
         return None
         
@@ -26,16 +33,19 @@ def find_attachment_file(excel_path, attachment_name):
     files_dir = excel_dir / 'files'
     
     if not files_dir.exists():
-        print(f"Warning: files directory not found at {files_dir}")
+        attachment_not_found_counter += 1
+        #print(f"Warning: files directory not found at {files_dir}")
         return None
     
     # Walk through all subdirectories
     for root, _, files in os.walk(files_dir):
         for file in files:
             if file == attachment_name:
+                attachment_found_counter += 1
                 return os.path.join(root, file)
     
-    print(f"Warning: Attachment not found: {attachment_name}")
+    attachment_not_found_counter += 1
+    #print(f"Warning: Attachment not found: {attachment_name}")
     return None
 
 class ChatReport:
@@ -49,24 +59,57 @@ class ChatReport:
         self.line_height = 15
         self.max_image_height = 120  # Maximum height for embedded images
         
-        # Register DejaVuSans font
+        # Register fonts
         font_path = Path(__file__).parent / 'fonts'
         try:
+            # Register DejaVuSans font for normal text
             pdfmetrics.registerFont(TTFont('DejaVuSans', str(font_path / 'DejaVuSans.ttf')))
+            # Register Symbola font for emojis
+            pdfmetrics.registerFont(TTFont('Symbola', str(font_path / 'Symbola.ttf')))
+            print("Fonts registered successfully")
         except Exception as e:
-            print(f"Warning: Error loading fonts: {e}")
+            print(f"Error loading fonts: {e}")
             print("Some characters might not display correctly.")
             
     def is_emoji(self, char):
-        return len(char) == 1 and ord(char) > 127 or char in ['👍', '😊', '😂', '❤️', '😍', '🤣', '😅', '😁']
+        """Check if a character is an emoji using comprehensive Unicode ranges"""
+        if not char:
+            return False
+            
+        emoji_pattern = (
+            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            "\U0001F300-\U0001F5FF"  # symbols & pictographs
+            "\U0001F600-\U0001F64F"  # emoticons
+            "\U0001F680-\U0001F6FF"  # transport & map symbols
+            "\U0001F700-\U0001F77F"  # alchemical symbols
+            "\U0001F780-\U0001F7FF"  # Geometric Shapes Extended
+            "\U0001F800-\U0001F8FF"  # Supplemental Arrows-C
+            "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+            "\U0001FA00-\U0001FA6F"  # Chess Symbols
+            "\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
+            "\U00002702-\U000027B0"  # Dingbats
+            "\U000024C2-\U0001F251"
+        )
+        
+        import re
+        pattern = f"[{emoji_pattern}]"
+        return bool(re.match(pattern, char))
         
     def draw_text_with_emojis(self, canvas, text, x, y, base_font='DejaVuSans', size=10):
         current_x = x
-        canvas.setFont(base_font, size)
         for char in text:
-            width = canvas.stringWidth(char, canvas._fontname, size)
-            canvas.drawString(current_x, y, char)
-            current_x += width
+            try:
+                if self.is_emoji(char):
+                    canvas.setFont('Symbola', size)
+                else:
+                    canvas.setFont(base_font, size)
+                width = canvas.stringWidth(char, canvas._fontname, size)
+                canvas.drawString(current_x, y, char)
+                current_x += width
+            except Exception as e:
+                print(f"Error drawing character '{char}': {e}")
+                canvas.setFont(base_font, size)
+                current_x += size/2
         return current_x - x  # Return total width
         
     def new_page(self, canvas):
@@ -388,6 +431,9 @@ def generate_chat_report(excel_file, output_file):
     
     # Save the PDF
     c.save()
+
+    print(f"Attachments not found: {attachment_not_found_counter}")
+    print(f"Attachments found: {attachment_found_counter}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate PDF report from chat export Excel file.')
