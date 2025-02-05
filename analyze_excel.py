@@ -1,4 +1,5 @@
 import pandas as pd
+import argparse
 
 def analyze_excel(excel_file):
     # Read the Excel file
@@ -26,5 +27,8 @@ def analyze_excel(excel_file):
         print(f"{col}: {first_row[col]}")
 
 if __name__ == "__main__":
-    excel_file = 'sample/Report.xlsx'
-    analyze_excel(excel_file)
+    parser = argparse.ArgumentParser(description='Analyze Excel file containing chat export data.')
+    parser.add_argument('excel_file', type=str, help='Path to the Excel file to analyze')
+    
+    args = parser.parse_args()
+    analyze_excel(args.excel_file)

@@ -8,22 +8,35 @@ from pathlib import Path
 import re
 from PIL import Image
 import os
+import argparse
+import sys
 
-# Read the Excel file
-excel_file = 'sample/Report.xlsx'
-df = pd.read_excel(excel_file, na_values=[''], keep_default_na=False)
-
-# Find the highest message number (total message count)
-message_numbers = []
-for _, row in df.iloc[1:].iterrows():
-    try:
-        msg_num = int(str(row.iloc[0]).strip())
-        message_numbers.append(msg_num)
-    except (ValueError, TypeError):
-        continue
-
-total_messages = max(message_numbers) if message_numbers else 0
-print(f"Total Messages: {total_messages}")
+def find_attachment_file(excel_path, attachment_name):
+    """
+    Search for an attachment file in the 'files' directory parallel to the Excel file.
+    Returns the full path if found, None otherwise.
+    """
+    print(f"Searching for attachment: {attachment_name}")
+    if not attachment_name or attachment_name == 'nan':
+        return None
+        
+    # Get the directory containing the Excel file
+    excel_dir = Path(excel_path).parent
+    # Construct path to the files directory
+    files_dir = excel_dir / 'files'
+    
+    if not files_dir.exists():
+        print(f"Warning: files directory not found at {files_dir}")
+        return None
+    
+    # Walk through all subdirectories
+    for root, _, files in os.walk(files_dir):
+        for file in files:
+            if file == attachment_name:
+                return os.path.join(root, file)
+    
+    print(f"Warning: Attachment not found: {attachment_name}")
+    return None
 
 class ChatReport:
     def __init__(self):
@@ -36,21 +49,21 @@ class ChatReport:
         self.line_height = 15
         self.max_image_height = 120  # Maximum height for embedded images
         
-        # Register fonts
+        # Register DejaVuSans font
         font_path = Path(__file__).parent / 'fonts'
-        pdfmetrics.registerFont(TTFont('DejaVuSans', str(font_path / 'DejaVuSans.ttf')))
-        pdfmetrics.registerFont(TTFont('SegoeEmoji', 'C:/Windows/Fonts/seguiemj.ttf'))
-        
+        try:
+            pdfmetrics.registerFont(TTFont('DejaVuSans', str(font_path / 'DejaVuSans.ttf')))
+        except Exception as e:
+            print(f"Warning: Error loading fonts: {e}")
+            print("Some characters might not display correctly.")
+            
     def is_emoji(self, char):
         return len(char) == 1 and ord(char) > 127 or char in ['👍', '😊', '😂', '❤️', '😍', '🤣', '😅', '😁']
         
     def draw_text_with_emojis(self, canvas, text, x, y, base_font='DejaVuSans', size=10):
         current_x = x
+        canvas.setFont(base_font, size)
         for char in text:
-            if self.is_emoji(char):
-                canvas.setFont('SegoeEmoji', size)
-            else:
-                canvas.setFont(base_font, size)
             width = canvas.stringWidth(char, canvas._fontname, size)
             canvas.drawString(current_x, y, char)
             current_x += width
@@ -72,10 +85,11 @@ class ChatReport:
         is_read = str(message_data.get('Status', ''))
         read_status = "✔️ Read" if "read" in is_read.lower() else ""
         attachment = str(message_data.get('attachment', ''))
+        attachment_path = message_data.get('attachment_path', '')
         
         # Only print if we have an image attachment
-        if attachment and attachment != 'nan' and self.is_image_file(attachment):
-            print(f"Found image attachment: {attachment}")
+        if attachment and attachment != 'nan' and self.is_image_file(attachment_path):
+            print(f"Image attachment: {attachment}")
             
         # Calculate positions
         left_col = self.margin
@@ -114,25 +128,25 @@ class ChatReport:
             
             # Handle attachment
             if attachment and attachment != 'nan':
-                if self.is_image_file(attachment):
+                if self.is_image_file(attachment_path):
                     # Add some spacing before image
                     y_offset += 5
-                    image_height = self.embed_image(canvas, attachment, middle_col, self.y_position - y_offset, self.max_image_height)
+                    image_height = self.embed_image(canvas, attachment_path, middle_col, self.y_position - y_offset, self.max_image_height)
                     if image_height > 0:
                         y_offset += image_height + 5
                 else:
                     # Display attachment name in smaller font
                     canvas.setFont('DejaVuSans', 8)
-                    canvas.drawString(middle_col, self.y_position - y_offset, f"📎 {attachment}")
+                    canvas.drawString(middle_col, self.y_position - y_offset, f"{attachment}")
                     y_offset += 10
             
             # Right: read status
-            canvas.setFont('SegoeEmoji', 8)
+            canvas.setFont('DejaVuSans', 8)
             canvas.drawString(right_col, self.y_position, read_status)
         else:
             # Similar structure for non-owner messages
             # Left: read status
-            canvas.setFont('SegoeEmoji', 8)
+            canvas.setFont('DejaVuSans', 8)
             canvas.drawString(left_col, self.y_position, read_status)
             
             # Middle: message with emoji support
@@ -157,16 +171,16 @@ class ChatReport:
             
             # Handle attachment
             if attachment and attachment != 'nan':
-                if self.is_image_file(attachment):
+                if self.is_image_file(attachment_path):
                     # Add some spacing before image
                     y_offset += 5
-                    image_height = self.embed_image(canvas, attachment, middle_col, self.y_position - y_offset, self.max_image_height)
+                    image_height = self.embed_image(canvas, attachment_path, middle_col, self.y_position - y_offset, self.max_image_height)
                     if image_height > 0:
                         y_offset += image_height + 5
                 else:
                     # Display attachment name in smaller font
                     canvas.setFont('DejaVuSans', 8)
-                    canvas.drawString(middle_col, self.y_position - y_offset, f"📎 {attachment}")
+                    canvas.drawString(middle_col, self.y_position - y_offset, f"{attachment}")
                     y_offset += 10
             
             # Right: sender name and timestamp
@@ -184,15 +198,15 @@ class ChatReport:
         """Check if the filename has an image extension."""
         if not filename:
             return False
-        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}
-        return Path(filename).suffix.lower() in image_extensions
-
+        return Path(filename).suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}
+    
     def embed_image(self, canvas, image_path, x, y, max_height):
         """Embed an image in the PDF with maximum height constraint."""
+        if not image_path or not os.path.exists(image_path):
+            print(f"Image not found: {image_path}")
+            return 0
+            
         try:
-            if not os.path.exists(image_path):
-                return 0  # Return 0 height if image doesn't exist
-                
             img = Image.open(image_path)
             img_width, img_height = img.size
             
@@ -211,11 +225,8 @@ class ChatReport:
     def calculate_text_width(self, canvas, text):
         """Calculate the width of text considering emojis."""
         width = 0
+        canvas.setFont('DejaVuSans', 10)
         for char in text:
-            if self.is_emoji(char):
-                canvas.setFont('SegoeEmoji', 10)
-            else:
-                canvas.setFont('DejaVuSans', 10)
             width += canvas.stringWidth(char, canvas._fontname, 10)
         return width
 
@@ -287,8 +298,10 @@ def generate_chat_report(excel_file, output_file):
         attachment = str(row.iloc[25]).strip()  # Attachment #1 is in column 25
         
         if attachment and attachment != 'nan':
-            if Path(attachment).suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}:
-                image_attachments.append(attachment)
+            attachment_path = find_attachment_file(excel_file, attachment)
+            if attachment_path:
+                if Path(attachment_path).suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}:
+                    image_attachments.append(attachment_path)
         
         if sender and sender != 'System Message System Message':
             chat_id, _ = parse_participant(sender)
@@ -329,9 +342,13 @@ def generate_chat_report(excel_file, output_file):
             # Check for attachment if body is empty
             if body_content == 'nan' or not body_content:
                 if attachment != 'nan' and attachment:
-                    body_content = f"📎 {attachment}"
+                    attachment_path = find_attachment_file(excel_file, attachment)
+                    if attachment_path:
+                        body_content = ""  # Don't set body content, we'll display attachment separately
+                    else:
+                        body_content = f"[Missing Attachment: {attachment}]"
                 else:
-                    body_content = "no valid body"
+                    body_content = "[Empty message]"
             
             # Get timestamp from Timestamp-Time column
             timestamp = str(row.iloc[18]).strip()
@@ -357,6 +374,12 @@ def generate_chat_report(excel_file, output_file):
                 'attachment': attachment
             }
             
+            # Add full path to attachment if it exists
+            if attachment and attachment != 'nan':
+                attachment_path = find_attachment_file(excel_file, attachment)
+                if attachment_path:
+                    message_data['attachment_path'] = attachment_path
+            
             messages.append(message_data)
 
     # Process each message
@@ -366,7 +389,29 @@ def generate_chat_report(excel_file, output_file):
     # Save the PDF
     c.save()
 
-# Generate the report
-output_file = 'chat_report.pdf'
-generate_chat_report(excel_file, output_file)
-print(f"PDF report has been generated: {output_file}")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Generate PDF report from chat export Excel file.')
+    parser.add_argument('excel_file', type=str, help='Path to the input Excel file')
+    parser.add_argument('--output', '-o', type=str, default='chat_report.pdf',
+                       help='Path to the output PDF file (default: chat_report.pdf)')
+    
+    args = parser.parse_args()
+    
+    # Read the Excel file
+    df = pd.read_excel(args.excel_file, na_values=[''], keep_default_na=False)
+    
+    # Find the highest message number (total message count)
+    message_numbers = []
+    for _, row in df.iloc[1:].iterrows():
+        try:
+            msg_num = int(str(row.iloc[0]).strip())
+            message_numbers.append(msg_num)
+        except (ValueError, TypeError):
+            continue
+    
+    total_messages = max(message_numbers) if message_numbers else 0
+    print(f"Total Messages: {total_messages}")
+    
+    # Generate the report
+    generate_chat_report(args.excel_file, args.output)
+    print(f"PDF report has been generated: {args.output}")
