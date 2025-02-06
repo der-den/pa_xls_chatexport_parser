@@ -142,6 +142,47 @@ class ChatReport:
         # Handle message content
         y_offset = 0
         
+        # Draw alternating background
+        if self.message_count % 2 == 0:
+            canvas.setFillColorRGB(0.97, 0.97, 0.97)  # Very light gray
+        else:
+            canvas.setFillColorRGB(0.95, 0.95, 1.0)   # Very light blue
+            
+        # Calculate total height for background
+        total_height = max(24, y_offset + 12)
+        if message_body and message_body != 'nan':
+            words = message_body.split()
+            current_line = ""
+            num_lines = 1
+            
+            for word in words:
+                test_line = current_line + " " + word if current_line else word
+                width = self.calculate_text_width(canvas, test_line)
+                
+                if width > 200:
+                    num_lines += 1
+                    current_line = word
+                else:
+                    current_line = test_line
+            
+            total_height = max(total_height, num_lines * 12 + 24)
+            
+        if attachment and attachment != 'nan' and self.is_image_file(attachment_path):
+            try:
+                img = Image.open(attachment_path)
+                img_width, img_height = img.size
+                aspect = img_width / img_height
+                new_height = min(self.max_image_height, img_height)
+                total_height += new_height + 10
+            except:
+                total_height += 10
+        
+        # Draw background including timestamp area
+        canvas.rect(self.margin - 10, self.y_position - total_height, 
+                   self.page_width - 2 * self.margin + 20, total_height + 15,
+                   fill=1, stroke=0)
+        canvas.setFillColorRGB(0, 0, 0)  # Reset to black for text
+        
         if is_owner:
             # Left: sender name and timestamp
             canvas.setFont('DejaVuSans', 10)
@@ -236,6 +277,7 @@ class ChatReport:
         self.y_position -= max(24, y_offset + 12)
         # Add some spacing between messages
         self.y_position -= 5
+        self.message_count += 1  # Increment for alternating backgrounds
 
     def is_image_file(self, filename):
         """Check if the filename has an image extension."""
