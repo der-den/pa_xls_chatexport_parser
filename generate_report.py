@@ -139,14 +139,18 @@ class ChatReport:
         middle_col = self.margin + 100
         right_col = self.page_width - self.margin - 100
         
+        # Calculate maximum width for content in middle column
+        # Reduziere die maximale Breite um einen Sicherheitsabstand von 20 Punkten
+        max_content_width = (right_col - middle_col) - 20
+        
         # Handle message content
         y_offset = 0
         
+        # Bestimme die Hintergrundfarbe
+        background_color = (0.97, 0.97, 0.97) if self.message_count % 2 == 0 else (0.95, 0.95, 1.0)
+        
         # Draw alternating background
-        if self.message_count % 2 == 0:
-            canvas.setFillColorRGB(0.97, 0.97, 0.97)  # Very light gray
-        else:
-            canvas.setFillColorRGB(0.95, 0.95, 1.0)   # Very light blue
+        canvas.setFillColorRGB(*background_color)
             
         # Calculate total height for background
         total_height = max(24, y_offset + 12)
@@ -167,13 +171,28 @@ class ChatReport:
             
             total_height = max(total_height, num_lines * 12 + 24)
             
+        # Berechne die Bildhöhe vor dem Zeichnen
         if attachment and attachment != 'nan' and self.is_image_file(attachment_path):
             try:
                 img = Image.open(attachment_path)
                 img_width, img_height = img.size
-                aspect = img_width / img_height
-                new_height = min(self.max_image_height, img_height)
-                total_height += new_height + 10
+                
+                # Calculate scale factors
+                width_scale = max_content_width / img_width
+                height_scale = self.max_image_height / img_height
+                scale = min(width_scale, height_scale, 1.0)
+                
+                # Calculate final height
+                final_height = img_height * scale
+                total_height += final_height + 10
+                
+                # Wenn das Bild nicht mehr auf die Seite passt, neue Seite beginnen
+                if self.y_position - total_height < self.margin:
+                    canvas.showPage()
+                    self.new_page(canvas)
+                    self.y_position = self.page_height - self.margin
+                    # Hintergrundfarbe nach Seitenumbruch neu setzen
+                    canvas.setFillColorRGB(*background_color)
             except:
                 total_height += 10
         
@@ -215,7 +234,10 @@ class ChatReport:
                 if self.is_image_file(attachment_path):
                     # Add some spacing before image
                     y_offset += 5
-                    image_height = self.embed_image(canvas, attachment_path, middle_col, self.y_position - y_offset, self.max_image_height)
+                    image_height = self.embed_image(canvas, attachment_path, middle_col, 
+                                                  self.y_position - y_offset, 
+                                                  self.max_image_height,
+                                                  max_content_width)  # Pass max width
                     if image_height > 0:
                         y_offset += image_height + 5
                 else:
@@ -258,7 +280,10 @@ class ChatReport:
                 if self.is_image_file(attachment_path):
                     # Add some spacing before image
                     y_offset += 5
-                    image_height = self.embed_image(canvas, attachment_path, middle_col, self.y_position - y_offset, self.max_image_height)
+                    image_height = self.embed_image(canvas, attachment_path, middle_col, 
+                                                  self.y_position - y_offset, 
+                                                  self.max_image_height,
+                                                  max_content_width)  # Pass max width
                     if image_height > 0:
                         y_offset += image_height + 5
                 else:
@@ -285,8 +310,8 @@ class ChatReport:
             return False
         return Path(filename).suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}
     
-    def embed_image(self, canvas, image_path, x, y, max_height):
-        """Embed an image in the PDF with maximum height constraint."""
+    def embed_image(self, canvas, image_path, x, y, max_height, max_width):
+        """Embed an image in the PDF with maximum height and width constraints."""
         if not image_path or not os.path.exists(image_path):
             print(f"Image not found: {image_path}")
             return 0
@@ -295,14 +320,28 @@ class ChatReport:
             img = Image.open(image_path)
             img_width, img_height = img.size
             
-            # Calculate new dimensions maintaining aspect ratio
-            aspect = img_width / img_height
-            new_height = min(max_height, img_height)
-            new_width = new_height * aspect
+            # Calculate scale factors for both constraints
+            width_scale = max_width / img_width
+            height_scale = max_height / img_height
+            
+            # Use the smaller scale to ensure both constraints are met
+            scale = min(width_scale, height_scale, 1.0)
+            
+            # Calculate final dimensions
+            final_width = img_width * scale
+            final_height = img_height * scale
+            
+            # Check if we need a new page for the image
+            if y - final_height < self.margin:
+                canvas.showPage()
+                self.new_page(canvas)
+                # Adjust y position to top of new page
+                y = self.page_height - self.margin
             
             # Draw the image
-            canvas.drawImage(image_path, x, y - new_height, width=new_width, height=new_height)
-            return new_height
+            canvas.drawImage(image_path, x, y - final_height, 
+                           width=final_width, height=final_height)
+            return final_height
         except Exception as e:
             print(f"Error embedding image {image_path}: {e}")
             return 0
