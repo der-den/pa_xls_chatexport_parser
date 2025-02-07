@@ -378,6 +378,11 @@ class ChatReport:
         self.y_position -= self.line_height * 2
 
 def generate_chat_report(excel_file, output_file):
+    # Get the directory of the input Excel file and create output path
+    input_dir = os.path.dirname(os.path.abspath(excel_file))
+    base_name = os.path.splitext(os.path.basename(excel_file))[0]
+    output_file = os.path.join(input_dir, f"{base_name}_chat_report.pdf")
+    
     # Read the Excel file
     df = pd.read_excel(excel_file, na_values=[''], keep_default_na=False)
     
