@@ -10,6 +10,7 @@ from PIL import Image
 import os
 import argparse
 import sys
+import math
 
 # Global counters
 attachment_not_found_counter = 0
@@ -50,14 +51,14 @@ def find_attachment_file(excel_path, attachment_name):
 
 class ChatReport:
     def __init__(self):
-        self.message_count = 0
-        self.participants = []
-        self.page_height = A4[1]
-        self.page_width = A4[0]
+        self.page_width, self.page_height = A4
         self.margin = 50
+        self.line_height = 14
         self.y_position = self.page_height - self.margin
-        self.line_height = 15
-        self.max_image_height = 120  # Maximum height for embedded images
+        self.max_image_height = 200
+        self.message_count = 0
+        self.current_page = 1  # Aktuelle Seite
+        self.total_pages = 1   # Mindestens eine Seite
         
         # Register fonts
         font_path = Path(__file__).parent / 'fonts'
@@ -70,7 +71,24 @@ class ChatReport:
         except Exception as e:
             print(f"Error loading fonts: {e}")
             print("Some characters might not display correctly.")
-            
+    
+    def add_page_number(self, canvas):
+        """Add page number to current page."""
+        page_text = f"Seite {self.current_page}/{self.total_pages}"
+        canvas.saveState()
+        canvas.setFont("Helvetica", 9)
+        canvas.drawRightString(self.page_width - self.margin, self.margin - 20, page_text)
+        canvas.restoreState()
+        
+    def new_page(self, canvas):
+        """Start a new page and reset position."""
+        canvas.showPage()
+        self.current_page += 1
+        self.total_pages = max(self.total_pages, self.current_page)
+        self.y_position = self.page_height - self.margin
+        canvas.setFont('DejaVuSans', 12)
+        self.add_page_number(canvas)
+        
     def is_emoji(self, char):
         """Check if a character is an emoji using comprehensive Unicode ranges"""
         if not char:
@@ -112,13 +130,8 @@ class ChatReport:
                 current_x += size/2
         return current_x - x  # Return total width
         
-    def new_page(self, canvas):
-        canvas.setFont('DejaVuSans', 12)
-        self.y_position = self.page_height - 60
-        
     def add_chat_line(self, canvas, message_data):
         if self.y_position < self.margin + self.line_height:
-            canvas.showPage()
             self.new_page(canvas)
             
         sender_name = str(message_data.get('sender_name', ''))
@@ -188,7 +201,6 @@ class ChatReport:
                 
                 # Wenn das Bild nicht mehr auf die Seite passt, neue Seite beginnen
                 if self.y_position - total_height < self.margin:
-                    canvas.showPage()
                     self.new_page(canvas)
                     self.y_position = self.page_height - self.margin
                     # Hintergrundfarbe nach Seitenumbruch neu setzen
@@ -333,7 +345,6 @@ class ChatReport:
             
             # Check if we need a new page for the image
             if y - final_height < self.margin:
-                canvas.showPage()
                 self.new_page(canvas)
                 # Adjust y position to top of new page
                 y = self.page_height - self.margin
@@ -511,6 +522,9 @@ def generate_chat_report(excel_file, output_file):
             
             messages.append(message_data)
 
+    # Initialisiere die erste Seite mit Seitennummer
+    report.add_page_number(c)
+    
     # Process each message
     for message in messages:
         report.add_chat_line(c, message)
