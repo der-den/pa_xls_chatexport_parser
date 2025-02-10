@@ -229,12 +229,12 @@ class ChatReport:
                     total_height += 10
             elif self.is_audio_file(attachment_path):
                 # Prüfe ob eine Transkription existiert
-                transcription = self.transcribe_audio(attachment_path)
+                transcription, is_video = self.transcribe_audio(attachment_path)
                 if transcription:
                     # Höhe für Header
                     total_height += 12
                     # Berechne Höhe für Transkriptionstext
-                    words = transcription.split()
+                    words = str(transcription).split()
                     current_line = ""
                     num_lines = 0
                     
@@ -309,11 +309,11 @@ class ChatReport:
                     # Transcribe audio/video and display result
                     if self.verbose:
                         print(f"Attempting to transcribe: {attachment_path}")
-                    transcription = self.transcribe_audio(attachment_path)
+                    transcription, is_video = self.transcribe_audio(attachment_path)
                     if transcription:
                         canvas.setFont('DejaVuSans', 8)
                         # Verschiebe den Header-Text nach oben, indem wir vom aktuellen y_offset 3 Punkte abziehen
-                        header_text = "Video Attachment, Transcription:" if self.is_video_file(attachment_path) else "Audio Attachment, Transcription:"
+                        header_text = "Video Attachment, Transcription:" if is_video else "Audio Attachment, Transcription:"
                         canvas.drawString(middle_col, self.y_position - (y_offset - 3), header_text)
                         y_offset += 15
                         # Display transcription text
@@ -386,11 +386,11 @@ class ChatReport:
                     # Transcribe audio/video and display result
                     if self.verbose:
                         print(f"Attempting to transcribe: {attachment_path}")
-                    transcription = self.transcribe_audio(attachment_path)
+                    transcription, is_video = self.transcribe_audio(attachment_path)
                     if transcription:
                         canvas.setFont('DejaVuSans', 8)
                         # Verschiebe den Header-Text nach oben, indem wir vom aktuellen y_offset 3 Punkte abziehen
-                        header_text = "Video Attachment, Transcription:" if self.is_video_file(attachment_path) else "Audio Attachment, Transcription:"
+                        header_text = "Video Attachment, Transcription:" if is_video else "Audio Attachment, Transcription:"
                         canvas.drawString(middle_col, self.y_position - (y_offset - 3), header_text)
                         y_offset += 15
                         # Display transcription text
@@ -452,7 +452,7 @@ class ChatReport:
     def extract_audio_from_video(self, video_path):
         """Extract audio from video file and return path to temporary audio file."""
         if not video_path:
-            return None
+            return None, False
             
         # Konvertiere zu absolutem Pfad
         abs_video_path = str(Path(video_path).resolve())
@@ -461,7 +461,7 @@ class ChatReport:
         if not os.path.exists(abs_video_path):
             if self.verbose:
                 print(f"Video file does not exist: {abs_video_path}")
-            return None
+            return None, False
             
         if self.verbose:
             print(f"Processing media file: {abs_video_path}")
@@ -475,7 +475,7 @@ class ChatReport:
             # Erstelle temporäre WAV-Datei
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
                 audio.export(temp_audio.name, format='wav')
-                return temp_audio.name
+                return temp_audio.name, True
         except Exception as audio_error:
             if self.verbose:
                 print(f"Not an audio-only file, trying as video: {audio_error}")
@@ -503,7 +503,7 @@ class ChatReport:
                 if self.verbose:
                     print(f"No audio track found in video: {Path(video_path).name}")
                 video.close()
-                return None
+                return None, False
                 
             # Erstelle temporäre WAV-Datei
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
@@ -513,7 +513,7 @@ class ChatReport:
                 video.close()
                 if self.verbose:
                     print("Audio extraction completed successfully")
-                return temp_audio.name
+                return temp_audio.name, True
                 
         except Exception as e:
             if self.verbose:
@@ -522,7 +522,7 @@ class ChatReport:
                 video.close()
             except:
                 pass
-            return None
+            return None, False
 
     def get_transcription_path(self, audio_path):
         """Get the path for the transcription file."""
@@ -569,7 +569,7 @@ class ChatReport:
         """Transcribe audio or video file using Whisper, with caching."""
         if not file_path or not os.path.exists(file_path):
             print(f"File not found: {file_path}")
-            return None
+            return None, False
             
         # Bestimme den Pfad für die Transkription
         trans_path = self.get_transcription_path(file_path)
@@ -579,7 +579,7 @@ class ChatReport:
         if cached_text is not None:
             if self.verbose:
                 print(f"Using cached transcription for {Path(file_path).name}")
-            return cached_text
+            return cached_text, False
             
         try:
             # Behandle Videos speziell
@@ -588,7 +588,7 @@ class ChatReport:
                     print(f"Processing video file: {Path(file_path).name}")
                 temp_audio_path = self.extract_audio_from_video(file_path)
                 if temp_audio_path is None:
-                    return None
+                    return None, False, False
                 audio_path = temp_audio_path
             else:
                 audio_path = file_path
@@ -625,7 +625,7 @@ class ChatReport:
             
         except Exception as e:
             print(f"Error transcribing {Path(file_path).name}: {e}")
-            return None
+            return None, False
     
     def embed_image(self, canvas, image_path, x, y, max_height, max_width):
         """Embed an image in the PDF with maximum height and width constraints."""
