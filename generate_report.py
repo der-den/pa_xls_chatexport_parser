@@ -231,8 +231,8 @@ class ChatReport:
                 # Prüfe ob eine Transkription existiert
                 transcription, is_video = self.transcribe_audio(attachment_path)
                 if transcription:
-                    # Höhe für Header
-                    total_height += 12
+                    # Höhe für Header und Abstand
+                    total_height += 20
                     # Berechne Höhe für Transkriptionstext
                     words = str(transcription).split()
                     current_line = ""
@@ -248,7 +248,8 @@ class ChatReport:
                             current_line = test_line
                     if current_line:
                         num_lines += 1
-                    total_height += num_lines * 12 + 10
+                    # Transkriptionstext + Abstand nach unten
+                    total_height += num_lines * 12 + 15
                 else:
                     total_height += 10
             else:
@@ -261,13 +262,81 @@ class ChatReport:
             # Hintergrundfarbe nach Seitenumbruch neu setzen
             canvas.setFillColorRGB(*background_color)
         
-        # Draw background including timestamp area
+        # Draw background including timestamp area and transcription
         canvas.rect(self.margin - 10, self.y_position - total_height, 
                    self.page_width - 2 * self.margin + 20, total_height + 15,
                    fill=1, stroke=0)
         canvas.setFillColorRGB(0, 0, 0)  # Reset to black for text
         
         if is_owner:
+            # Berechne zuerst die Gesamthöhe für Owner-Nachrichten
+            message_height = 0
+            
+            # Höhe für Nachrichtentext
+            if message_body and message_body != 'nan':
+                words = message_body.split()
+                current_line = ""
+                num_lines = 0
+                
+                for word in words:
+                    test_line = current_line + " " + word if current_line else word
+                    width = self.calculate_text_width(canvas, test_line)
+                    if width > 200:
+                        num_lines += 1
+                        current_line = word
+                    else:
+                        current_line = test_line
+                if current_line:
+                    num_lines += 1
+                message_height = num_lines * 12 + 15  # Text + Abstand
+
+            # Höhe für Anhänge
+            attachment_height = 0
+            if attachment and attachment != 'nan':
+                if self.is_image_file(attachment_path):
+                    try:
+                        img = Image.open(attachment_path)
+                        img_width, img_height = img.size
+                        width_scale = max_content_width / img_width
+                        height_scale = self.max_image_height / img_height
+                        scale = min(width_scale, height_scale, 1.0)
+                        attachment_height = img_height * scale + 10
+                    except:
+                        attachment_height = 10
+                elif self.is_audio_file(attachment_path) or self.is_video_file(attachment_path):
+                    transcription, is_video = self.transcribe_audio(attachment_path)
+                    if transcription:
+                        # Höhe für Header
+                        attachment_height += 20
+                        # Höhe für Transkriptionstext
+                        words = str(transcription).split()
+                        current_line = ""
+                        num_lines = 0
+                        for word in words:
+                            test_line = current_line + " " + word if current_line else word
+                            width = self.calculate_text_width(canvas, test_line)
+                            if width > 200:
+                                num_lines += 1
+                                current_line = word
+                            else:
+                                current_line = test_line
+                        if current_line:
+                            num_lines += 1
+                        attachment_height += num_lines * 12 + 15
+
+            # Gesamthöhe berechnen
+            total_height = max(message_height, 24) + attachment_height  # Mindestens 24 für Name und Timestamp
+
+            # Zeichne den Hintergrund
+            canvas.setFillColorRGB(*background_color)  # Setze die Hintergrundfarbe
+            canvas.rect(self.margin - 10, self.y_position - total_height,
+                       self.page_width - 2 * self.margin + 20, total_height + 15,
+                       fill=1, stroke=0)
+            canvas.setFillColorRGB(0, 0, 0)  # Reset to black for text
+
+            # Jetzt zeichne den Inhalt
+            y_offset = 0
+            
             # Left: sender name and timestamp
             canvas.setFont('DejaVuSans', 10)
             canvas.drawString(left_col, self.y_position, sender_name)
@@ -311,14 +380,14 @@ class ChatReport:
                         print(f"Attempting to transcribe: {attachment_path}")
                     transcription, is_video = self.transcribe_audio(attachment_path)
                     if transcription:
+                        y_offset += 5  # Abstand vor der Transkription
                         canvas.setFont('DejaVuSans', 8)
-                        # Verschiebe den Header-Text nach oben, indem wir vom aktuellen y_offset 3 Punkte abziehen
                         header_text = "Video Attachment, Transcription:" if is_video else "Audio Attachment, Transcription:"
-                        canvas.drawString(middle_col, self.y_position - (y_offset - 3), header_text)
-                        y_offset += 15
+                        canvas.drawString(middle_col, self.y_position - y_offset, header_text)
+                        y_offset += 12
                         # Display transcription text
                         canvas.setFont('DejaVuSans', 10)
-                        words = transcription.split()
+                        words = str(transcription).split()
                         current_line = ""
                         for word in words:
                             test_line = current_line + " " + word if current_line else word
@@ -388,14 +457,14 @@ class ChatReport:
                         print(f"Attempting to transcribe: {attachment_path}")
                     transcription, is_video = self.transcribe_audio(attachment_path)
                     if transcription:
+                        y_offset += 5  # Abstand vor der Transkription
                         canvas.setFont('DejaVuSans', 8)
-                        # Verschiebe den Header-Text nach oben, indem wir vom aktuellen y_offset 3 Punkte abziehen
                         header_text = "Video Attachment, Transcription:" if is_video else "Audio Attachment, Transcription:"
-                        canvas.drawString(middle_col, self.y_position - (y_offset - 3), header_text)
-                        y_offset += 15
+                        canvas.drawString(middle_col, self.y_position - y_offset, header_text)
+                        y_offset += 12
                         # Display transcription text
                         canvas.setFont('DejaVuSans', 10)
-                        words = transcription.split()
+                        words = str(transcription).split()
                         current_line = ""
                         for word in words:
                             test_line = current_line + " " + word if current_line else word
