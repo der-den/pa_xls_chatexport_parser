@@ -53,7 +53,7 @@ def find_attachment_file(excel_path, attachment_name):
     return None
 
 class ChatReport:
-    def __init__(self):
+    def __init__(self, verbose=False):
         self.page_width, self.page_height = A4
         self.margin = 50
         self.line_height = 14
@@ -62,6 +62,7 @@ class ChatReport:
         self.message_count = 0
         self.current_page = 1  # Aktuelle Seite
         self.total_pages = 1   # Mindestens eine Seite
+        self.verbose = verbose
         
         # Register fonts
         font_path = Path(__file__).parent / 'fonts'
@@ -148,7 +149,8 @@ class ChatReport:
         
         # Only print if we have an image attachment
         if attachment and attachment != 'nan' and self.is_image_file(attachment_path):
-            print(f"Image attachment: {attachment}")
+            if self.verbose:
+                print(f"Image attachment: {attachment}")
             
         # Calculate positions
         left_col = self.margin
@@ -467,11 +469,13 @@ class ChatReport:
         # Check for cached transcription
         cached_text = self.load_cached_transcription(trans_path)
         if cached_text is not None:
-            print(f"Using cached transcription for {Path(audio_path).name}")
+            if self.verbose:
+                print(f"Using cached transcription for {Path(audio_path).name}")
             return cached_text
 
         try:
-            print(f"Transcribing {Path(audio_path).name}...")
+            if self.verbose:
+                print(f"Transcribing {Path(audio_path).name}...")
             # Load the Whisper model (using base model for speed)
             model = whisper.load_model("base")
 
@@ -562,7 +566,7 @@ class ChatReport:
         canvas.line(self.margin, self.y_position, self.page_width - self.margin, self.y_position)
         self.y_position -= self.line_height * 2
 
-def generate_chat_report(excel_file, output_file):
+def generate_chat_report(excel_file, output_file, verbose=False):
     # Get the directory of the input Excel file and create output path
     input_dir = os.path.dirname(os.path.abspath(excel_file))
     base_name = os.path.splitext(os.path.basename(excel_file))[0]
@@ -573,7 +577,7 @@ def generate_chat_report(excel_file, output_file):
     
     # Create PDF
     c = canvas.Canvas(output_file, pagesize=A4)
-    report = ChatReport()
+    report = ChatReport(verbose=verbose)
     
     # Process the data to find owner and participants
     participants_dict = {}
@@ -625,7 +629,7 @@ def generate_chat_report(excel_file, output_file):
                     participants_dict[chat_id]['is_owner'] = True
                     break
 
-    if image_attachments:
+    if image_attachments and verbose:
         print(f"\nFound {len(image_attachments)} image attachments in chat:")
         for img in image_attachments:
             print(f"- {img}")
@@ -718,6 +722,8 @@ if __name__ == "__main__":
     parser.add_argument('excel_file', type=str, help='Path to the input Excel file')
     parser.add_argument('--output', '-o', type=str, default='chat_report.pdf',
                        help='Path to the output PDF file (default: chat_report.pdf)')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                       help='Enable verbose output')
     
     args = parser.parse_args()
     
@@ -737,5 +743,5 @@ if __name__ == "__main__":
     print(f"Total Messages: {total_messages}")
     
     # Generate the report
-    generate_chat_report(args.excel_file, args.output)
+    generate_chat_report(args.excel_file, args.output, verbose=args.verbose)
     print(f"PDF report has been generated: {args.output}")
