@@ -6,3 +6,4 @@ openai-whisper==20231117
 numpy>=1.23.5
 torch>=2.0.0
 pydub==0.25.1  # für Audio-Datei-Handling
+moviepy==1.0.3  # für Video-zu-Audio Konvertierung
