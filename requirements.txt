@@ -2,3 +2,7 @@ pandas==2.1.4
 openpyxl==3.1.2
 fpdf2==2.7.6
 reportlab==4.1.0
+openai-whisper==20231117
+numpy>=1.23.5
+torch>=2.0.0
+pydub==0.25.1  # für Audio-Datei-Handling

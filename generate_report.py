@@ -11,6 +11,9 @@ import os
 import argparse
 import sys
 import math
+import whisper
+from pydub import AudioSegment
+import tempfile
 
 # Global counters
 attachment_not_found_counter = 0
@@ -252,6 +255,35 @@ class ChatReport:
                                                   max_content_width)  # Pass max width
                     if image_height > 0:
                         y_offset += image_height + 5
+                elif self.is_audio_file(attachment_path):
+                    # Add some spacing before audio transcription
+                    y_offset += 5
+                    # Transcribe audio and display result
+                    transcription = self.transcribe_audio(attachment_path)
+                    if transcription:
+                        canvas.setFont('DejaVuSans', 8)
+                        canvas.drawString(middle_col, self.y_position - y_offset, f"Audio Transcription:")
+                        y_offset += 12
+                        # Display transcription text
+                        canvas.setFont('DejaVuSans', 10)
+                        words = transcription.split()
+                        current_line = ""
+                        for word in words:
+                            test_line = current_line + " " + word if current_line else word
+                            width = self.calculate_text_width(canvas, test_line)
+                            if width > 200:
+                                self.draw_text_with_emojis(canvas, current_line, middle_col + 10, self.y_position - y_offset)
+                                current_line = word
+                                y_offset += 12
+                            else:
+                                current_line = test_line
+                        if current_line:
+                            self.draw_text_with_emojis(canvas, current_line, middle_col + 10, self.y_position - y_offset)
+                            y_offset += 12
+                    else:
+                        canvas.setFont('DejaVuSans', 8)
+                        canvas.drawString(middle_col, self.y_position - y_offset, f"🎵 [Audio: {attachment}] (Transcription failed)")
+                        y_offset += 10
                 else:
                     # Display attachment name in smaller font
                     canvas.setFont('DejaVuSans', 8)
@@ -298,6 +330,35 @@ class ChatReport:
                                                   max_content_width)  # Pass max width
                     if image_height > 0:
                         y_offset += image_height + 5
+                elif self.is_audio_file(attachment_path):
+                    # Add some spacing before audio transcription
+                    y_offset += 5
+                    # Transcribe audio and display result
+                    transcription = self.transcribe_audio(attachment_path)
+                    if transcription:
+                        canvas.setFont('DejaVuSans', 8)
+                        canvas.drawString(middle_col, self.y_position - y_offset, f"Audio Transcription:")
+                        y_offset += 12
+                        # Display transcription text
+                        canvas.setFont('DejaVuSans', 10)
+                        words = transcription.split()
+                        current_line = ""
+                        for word in words:
+                            test_line = current_line + " " + word if current_line else word
+                            width = self.calculate_text_width(canvas, test_line)
+                            if width > 200:
+                                self.draw_text_with_emojis(canvas, current_line, middle_col + 10, self.y_position - y_offset)
+                                current_line = word
+                                y_offset += 12
+                            else:
+                                current_line = test_line
+                        if current_line:
+                            self.draw_text_with_emojis(canvas, current_line, middle_col + 10, self.y_position - y_offset)
+                            y_offset += 12
+                    else:
+                        canvas.setFont('DejaVuSans', 8)
+                        canvas.drawString(middle_col, self.y_position - y_offset, f"🎵 [Audio: {attachment}] (Transcription failed)")
+                        y_offset += 10
                 else:
                     # Display attachment name in smaller font
                     canvas.setFont('DejaVuSans', 8)
@@ -321,6 +382,94 @@ class ChatReport:
         if not filename:
             return False
         return Path(filename).suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}
+
+    def is_audio_file(self, filename):
+        """Check if the filename has an audio extension."""
+        if not filename:
+            return False
+        return Path(filename).suffix.lower() in {'.mp3', '.wav', '.m4a', '.ogg', '.aac'}
+
+    def get_transcription_path(self, audio_path):
+        """Get the path for the transcription file."""
+        # Convert audio_path to absolute path
+        abs_audio_path = Path(audio_path).resolve()
+        #print(f"Audio file absolute path: {abs_audio_path}")
+        
+        # Get the directory containing the 'files' directory
+        base_dir = abs_audio_path.parent.parent.parent  # Go up from audio file to 'files' directory, then up again to root
+        #print(f"Base directory: {base_dir}")
+        
+        # Create transcriptions directory parallel to 'files'
+        trans_dir = base_dir / 'transcriptions'
+        #print(f"Creating transcriptions directory at: {trans_dir}")
+        trans_dir.mkdir(exist_ok=True)
+        
+        # Create a filename based on the original audio filename
+        audio_filename = abs_audio_path.name
+        trans_filename = f"{Path(audio_filename).stem}.txt"
+        final_path = trans_dir / trans_filename
+        #print(f"Transcription will be saved to: {final_path}")
+        
+        return final_path
+
+    def load_cached_transcription(self, trans_path):
+        """Load transcription from cache if it exists."""
+        try:
+            if trans_path.exists():
+                with open(trans_path, 'r', encoding='utf-8') as f:
+                    return f.read().strip()
+        except Exception as e:
+            print(f"Error reading cached transcription: {e}")
+        return None
+
+    def save_transcription(self, trans_path, text):
+        """Save transcription to cache."""
+        try:
+            with open(trans_path, 'w', encoding='utf-8') as f:
+                f.write(text)
+        except Exception as e:
+            print(f"Error saving transcription: {e}")
+
+    def transcribe_audio(self, audio_path):
+        """Transcribe audio file using Whisper, with caching."""
+        if not audio_path or not os.path.exists(audio_path):
+            print(f"Audio file not found: {audio_path}")
+            return None
+
+        # Get transcription file path
+        trans_path = self.get_transcription_path(audio_path)
+        
+        # Check for cached transcription
+        cached_text = self.load_cached_transcription(trans_path)
+        if cached_text is not None:
+            print(f"Using cached transcription for {Path(audio_path).name}")
+            return cached_text
+
+        try:
+            print(f"Transcribing {Path(audio_path).name}...")
+            # Load the Whisper model (using base model for speed)
+            model = whisper.load_model("base")
+
+            # Convert non-WAV files to WAV using pydub
+            audio_ext = Path(audio_path).suffix.lower()
+            if audio_ext != '.wav':
+                audio = AudioSegment.from_file(audio_path)
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=True) as temp_wav:
+                    audio.export(temp_wav.name, format='wav')
+                    result = model.transcribe(temp_wav.name)
+            else:
+                result = model.transcribe(audio_path)
+
+            transcribed_text = result['text'].strip()
+            
+            # Cache the transcription
+            self.save_transcription(trans_path, transcribed_text)
+            #print(f"Transcription saved for {Path(audio_path).name}")
+            
+            return transcribed_text
+        except Exception as e:
+            print(f"Error transcribing audio {audio_path}: {e}")
+            return None
     
     def embed_image(self, canvas, image_path, x, y, max_height, max_width):
         """Embed an image in the PDF with maximum height and width constraints."""
@@ -519,6 +668,10 @@ def generate_chat_report(excel_file, output_file):
                 attachment_path = find_attachment_file(excel_file, attachment)
                 if attachment_path:
                     message_data['attachment_path'] = attachment_path
+                    # Wenn es eine Audio-Datei ist, füge Transkription hinzu
+                    if report.is_audio_file(attachment_path):
+                        transcription = report.transcribe_audio(attachment_path)
+                        message_data['audio_transcription'] = transcription
             
             messages.append(message_data)
 
