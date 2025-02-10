@@ -79,7 +79,7 @@ class ChatReport:
     
     def add_page_number(self, canvas):
         """Add page number to current page."""
-        page_text = f"Seite {self.current_page}/{self.total_pages}"
+        page_text = f"Seite {self.current_page}"
         canvas.saveState()
         canvas.setFont("Helvetica", 9)
         canvas.drawRightString(self.page_width - self.margin, self.margin - 20, page_text)
@@ -743,14 +743,27 @@ class ChatReport:
         # Set initial position at the top of the page
         self.y_position = self.page_height - self.margin
         
-        # Add title
+        # Excel Dateiname ohne Endung
         canvas.setFont('DejaVuSans', 14)
+        if isinstance(participants_data, dict):
+            excel_name = Path(participants_data['excel_path']).stem
+            participants_list = participants_data['participants']
+        else:
+            # Legacy Format: participants_data ist direkt die Liste
+            excel_name = Path(participants_data[0].get('excel_path', '')).stem
+            participants_list = participants_data
+
+        canvas.drawString(self.margin, self.y_position, excel_name)
+        self.y_position -= self.line_height * 1.5
+        
+        # Add title
+        canvas.setFont('DejaVuSans', 11)
         canvas.drawString(self.margin, self.y_position, "Chat Participants:")
         self.y_position -= self.line_height * 2
         
         # Add participants
         canvas.setFont('DejaVuSans', 10)
-        for participant in participants_data:
+        for participant in participants_list:
             name = participant.get('sender_name', '')
             is_owner = participant.get('is_owner', False)
             participant_text = f"{name} {'(OWNER)' if is_owner else ''}"
@@ -903,6 +916,24 @@ def generate_chat_report(excel_file, output_file, verbose=False):
     # Initialisiere die erste Seite mit Seitennummer
     report.add_page_number(c)
     
+    # Sammle Teilnehmer und füge Excel-Pfad hinzu
+    participants = {
+        'excel_path': excel_file,
+        'participants': []
+    }
+    seen = set()
+    for message in messages:
+        sender_name = message.get('sender_name')
+        if sender_name and sender_name not in seen:
+            seen.add(sender_name)
+            participants['participants'].append({
+                'sender_name': sender_name,
+                'is_owner': message.get('is_owner', False)
+            })
+
+    # Füge Teilnehmerliste hinzu
+    report.add_participants_header(c, participants)
+
     # Process each message
     for message in messages:
         report.add_chat_line(c, message)
