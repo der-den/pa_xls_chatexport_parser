@@ -187,29 +187,56 @@ class ChatReport:
             
             total_height = max(total_height, num_lines * 12 + 24)
             
-        # Berechne die Bildhöhe vor dem Zeichnen
-        if attachment and attachment != 'nan' and self.is_image_file(attachment_path):
-            try:
-                img = Image.open(attachment_path)
-                img_width, img_height = img.size
-                
-                # Calculate scale factors
-                width_scale = max_content_width / img_width
-                height_scale = self.max_image_height / img_height
-                scale = min(width_scale, height_scale, 1.0)
-                
-                # Calculate final height
-                final_height = img_height * scale
-                total_height += final_height + 10
-                
-                # Wenn das Bild nicht mehr auf die Seite passt, neue Seite beginnen
-                if self.y_position - total_height < self.margin:
-                    self.new_page(canvas)
-                    self.y_position = self.page_height - self.margin
-                    # Hintergrundfarbe nach Seitenumbruch neu setzen
-                    canvas.setFillColorRGB(*background_color)
-            except:
+        # Berechne zusätzliche Höhe für Anhänge
+        if attachment and attachment != 'nan':
+            if self.is_image_file(attachment_path):
+                try:
+                    img = Image.open(attachment_path)
+                    img_width, img_height = img.size
+                    
+                    # Calculate scale factors
+                    width_scale = max_content_width / img_width
+                    height_scale = self.max_image_height / img_height
+                    scale = min(width_scale, height_scale, 1.0)
+                    
+                    # Calculate final height
+                    final_height = img_height * scale
+                    total_height += final_height + 10
+                except:
+                    total_height += 10
+            elif self.is_audio_file(attachment_path):
+                # Prüfe ob eine Transkription existiert
+                transcription = self.transcribe_audio(attachment_path)
+                if transcription:
+                    # Höhe für Header
+                    total_height += 12
+                    # Berechne Höhe für Transkriptionstext
+                    words = transcription.split()
+                    current_line = ""
+                    num_lines = 0
+                    
+                    for word in words:
+                        test_line = current_line + " " + word if current_line else word
+                        width = self.calculate_text_width(canvas, test_line)
+                        if width > 200:
+                            num_lines += 1
+                            current_line = word
+                        else:
+                            current_line = test_line
+                    if current_line:
+                        num_lines += 1
+                    total_height += num_lines * 12 + 10
+                else:
+                    total_height += 10
+            else:
                 total_height += 10
+                
+        # Wenn der Inhalt nicht mehr auf die Seite passt, neue Seite beginnen
+        if self.y_position - total_height < self.margin:
+            self.new_page(canvas)
+            self.y_position = self.page_height - self.margin
+            # Hintergrundfarbe nach Seitenumbruch neu setzen
+            canvas.setFillColorRGB(*background_color)
         
         # Draw background including timestamp area
         canvas.rect(self.margin - 10, self.y_position - total_height, 
@@ -256,14 +283,13 @@ class ChatReport:
                     if image_height > 0:
                         y_offset += image_height + 5
                 elif self.is_audio_file(attachment_path):
-                    # Add some spacing before audio transcription
-                    y_offset += 5
                     # Transcribe audio and display result
                     transcription = self.transcribe_audio(attachment_path)
                     if transcription:
                         canvas.setFont('DejaVuSans', 8)
-                        canvas.drawString(middle_col, self.y_position - y_offset, f"Audio Transcription:")
-                        y_offset += 12
+                        # Verschiebe den Header-Text nach oben, indem wir vom aktuellen y_offset 3 Punkte abziehen
+                        canvas.drawString(middle_col, self.y_position - (y_offset - 3), f"Audio Attachment, Transcription:")
+                        y_offset += 15
                         # Display transcription text
                         canvas.setFont('DejaVuSans', 10)
                         words = transcription.split()
@@ -331,14 +357,13 @@ class ChatReport:
                     if image_height > 0:
                         y_offset += image_height + 5
                 elif self.is_audio_file(attachment_path):
-                    # Add some spacing before audio transcription
-                    y_offset += 5
                     # Transcribe audio and display result
                     transcription = self.transcribe_audio(attachment_path)
                     if transcription:
                         canvas.setFont('DejaVuSans', 8)
-                        canvas.drawString(middle_col, self.y_position - y_offset, f"Audio Transcription:")
-                        y_offset += 12
+                        # Verschiebe den Header-Text nach oben, indem wir vom aktuellen y_offset 3 Punkte abziehen
+                        canvas.drawString(middle_col, self.y_position - (y_offset - 3), f"Audio Attachment, Transcription:")
+                        y_offset += 15
                         # Display transcription text
                         canvas.setFont('DejaVuSans', 10)
                         words = transcription.split()
