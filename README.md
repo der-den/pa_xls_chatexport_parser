@@ -25,7 +25,7 @@ A Python tool for converting Excel-based PA chat exports into a readable PDF for
 ## Usage
 
 ```bash
-python generate_report.py [-h] [-o OUTPUT] [-v] excel_file
+python generate_report.py [-h] [-o OUTPUT] [-v] [-m MODEL] excel_file
 ```
 
 ### Command Line Parameters
@@ -33,6 +33,9 @@ python generate_report.py [-h] [-o OUTPUT] [-v] excel_file
 - `excel_file`: Path to the Excel file containing chat data (required)
 - `-o, --output`: Path to the output PDF file (optional, default: excel_file.pdf)
 - `-v, --verbose`: Enable verbose output for debugging or scripting (optional)
+- `-m, --model`: Whisper model to use for transcription (optional, default: medium)
+  - Available models: tiny, base, small, medium, large
+  - Larger models are more accurate but slower and use more memory
 
 ### Example
 

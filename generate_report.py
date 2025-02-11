@@ -12,6 +12,7 @@ import argparse
 import sys
 import math
 import whisper
+import torch
 from pydub import AudioSegment
 from moviepy.editor import VideoFileClip
 import tempfile
@@ -54,7 +55,7 @@ def find_attachment_file(excel_path, attachment_name):
     return None
 
 class ChatReport:
-    def __init__(self, verbose=False):
+    def __init__(self, verbose=False, model_name="medium"):
         self.page_width, self.page_height = A4
         self.margin = 50
         self.line_height = 14
@@ -64,6 +65,20 @@ class ChatReport:
         self.current_page = 1  # Aktuelle Seite
         self.total_pages = 1   # Mindestens eine Seite
         self.verbose = verbose
+        self.model_name = model_name  # Whisper model name
+
+        # Load Whisper model at initialization
+        print(f"Loading Whisper model '{self.model_name}'...")
+        self._whisper_model = whisper.load_model(self.model_name)
+        
+        # Get device information
+        device_info = "CPU"
+        if torch.cuda.is_available():
+            device_info = f"GPU ({torch.cuda.get_device_name(0)})"
+        elif torch.backends.mps.is_available():
+            device_info = "Apple Silicon"
+        
+        print(f"Successfully loaded on: {device_info}")
         
         # Register fonts
         font_path = Path(__file__).parent / 'fonts'
@@ -668,17 +683,14 @@ class ChatReport:
             if self.verbose:
                 print(f"Transcribing {Path(file_path).name}...")
                 
-            # Load the Whisper model (using base model for speed)
-            model = whisper.load_model("base")
-
             # Convert non-WAV files to WAV using pydub if needed
             if not self.is_video_file(file_path) and Path(audio_path).suffix.lower() != '.wav':
                 audio = AudioSegment.from_file(audio_path)
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=True) as temp_wav:
                     audio.export(temp_wav.name, format='wav')
-                    result = model.transcribe(temp_wav.name)
+                    result = self._whisper_model.transcribe(temp_wav.name)
             else:
-                result = model.transcribe(audio_path)
+                result = self._whisper_model.transcribe(audio_path)
 
             transcribed_text = result['text'].strip()
             
@@ -782,7 +794,7 @@ class ChatReport:
         canvas.line(self.margin, self.y_position, self.page_width - self.margin, self.y_position)
         self.y_position -= self.line_height * 2
 
-def generate_chat_report(excel_file, output_file, verbose=False):
+def generate_chat_report(excel_file, output_file, verbose=False, model_name="medium"):
     # Get the directory of the input Excel file and create output path
     input_dir = os.path.dirname(os.path.abspath(excel_file))
     base_name = os.path.splitext(os.path.basename(excel_file))[0]
@@ -791,9 +803,13 @@ def generate_chat_report(excel_file, output_file, verbose=False):
     # Read the Excel file
     df = pd.read_excel(excel_file, na_values=[''], keep_default_na=False)
     
+    # Count total messages at the start
+    total_messages = len(df.iloc[1:])
+    print(f"Total Messages: {total_messages}")
+    
     # Create PDF
     c = canvas.Canvas(output_file, pagesize=A4)
-    report = ChatReport(verbose=verbose)
+    report = ChatReport(verbose=verbose, model_name=model_name)
     
     # Process the data to find owner and participants
     participants_dict = {}
@@ -948,8 +964,10 @@ def generate_chat_report(excel_file, output_file, verbose=False):
     # Save the PDF
     c.save()
 
-    print(f"Attachments not found: {attachment_not_found_counter}")
+    # Print attachment statistics
     print(f"Attachments found: {attachment_found_counter}")
+    if attachment_not_found_counter > 0:
+        print(f"Attachments not found: {attachment_not_found_counter}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate PDF report from chat export Excel file.')
@@ -958,24 +976,12 @@ if __name__ == "__main__":
                        help='Path to the output PDF file (default: chat_report.pdf)')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Enable verbose output')
+    parser.add_argument('--model', '-m', type=str, default='medium',
+                       choices=['tiny', 'base', 'small', 'medium', 'large'],
+                       help='Whisper model to use for transcription (default: medium)')
     
     args = parser.parse_args()
     
-    # Read the Excel file
-    df = pd.read_excel(args.excel_file, na_values=[''], keep_default_na=False)
-    
-    # Find the highest message number (total message count)
-    message_numbers = []
-    for _, row in df.iloc[1:].iterrows():
-        try:
-            msg_num = int(str(row.iloc[0]).strip())
-            message_numbers.append(msg_num)
-        except (ValueError, TypeError):
-            continue
-    
-    total_messages = max(message_numbers) if message_numbers else 0
-    print(f"Total Messages: {total_messages}")
-    
     # Generate the report
-    generate_chat_report(args.excel_file, args.output, verbose=args.verbose)
+    generate_chat_report(args.excel_file, args.output, args.verbose, args.model)
     print(f"PDF report has been generated: {args.output}")
