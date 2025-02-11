@@ -655,10 +655,10 @@ class ChatReport:
             if self.is_video_file(file_path):
                 if self.verbose:
                     print(f"Processing video file: {Path(file_path).name}")
-                temp_audio_path = self.extract_audio_from_video(file_path)
-                if temp_audio_path is None:
-                    return None, False, False
-                audio_path = temp_audio_path
+                temp_audio_result = self.extract_audio_from_video(file_path)
+                if temp_audio_result is None or temp_audio_result[0] is None:
+                    return None, False
+                audio_path = temp_audio_result[0]  # Nur den Pfad verwenden, nicht das Tupel
             else:
                 audio_path = file_path
                 
@@ -690,7 +690,8 @@ class ChatReport:
                     if self.verbose:
                         print(f"Warning: Could not delete temporary audio file: {e}")
             
-            return transcribed_text
+            is_video = self.is_video_file(file_path)
+            return transcribed_text, is_video
             
         except Exception as e:
             print(f"Error transcribing {Path(file_path).name}: {e}")
