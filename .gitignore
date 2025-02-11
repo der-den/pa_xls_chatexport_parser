@@ -2,5 +2,6 @@
 !*.py
 !*.ttf
 !*.txt
+!*.md
 !.gitignore
 read_excel_structure.py

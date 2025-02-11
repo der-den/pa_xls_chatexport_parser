@@ -748,7 +748,7 @@ class ChatReport:
         self.y_position = self.page_height - self.margin
         
         # Excel Dateiname ohne Endung
-        canvas.setFont('DejaVuSans', 14)
+        canvas.setFont('DejaVuSans', 16)
         if isinstance(participants_data, dict):
             excel_name = Path(participants_data['excel_path']).stem
             participants_list = participants_data['participants']
@@ -757,8 +757,11 @@ class ChatReport:
             excel_name = Path(participants_data[0].get('excel_path', '')).stem
             participants_list = participants_data
 
-        canvas.drawString(self.margin, self.y_position, excel_name)
-        self.y_position -= self.line_height * 1.5
+        # Zentriere den Dateinamen
+        text_width = canvas.stringWidth(excel_name, 'DejaVuSans', 16)
+        x_position = (self.page_width - text_width) / 2
+        canvas.drawString(x_position, self.y_position, excel_name)
+        self.y_position -= self.line_height * 2
         
         # Add title
         canvas.setFont('DejaVuSans', 11)
