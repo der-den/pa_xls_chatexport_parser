@@ -4,33 +4,22 @@ import zipfile
 import tempfile
 import shutil
 
-def download_font(url, filename):
-    print(f"Downloading {filename}...")
-    urllib.request.urlretrieve(url, f"fonts/{filename}")
-    print(f"Downloaded {filename}")
-
-# DejaVu font URLs from a more reliable source
-fonts = {
-    'DejaVuSans.ttf': 'https://downloads.sourceforge.net/project/dejavu/dejavu/2.37/dejavu-fonts-ttf-2.37.zip',
-    'DejaVuSans-Bold.ttf': 'https://downloads.sourceforge.net/project/dejavu/dejavu/2.37/dejavu-fonts-ttf-2.37.zip',
-    'DejaVuSans-Oblique.ttf': 'https://downloads.sourceforge.net/project/dejavu/dejavu/2.37/dejavu-fonts-ttf-2.37.zip'
-}
-
 # Create fonts directory if it doesn't exist
 os.makedirs('fonts', exist_ok=True)
 
-# Download Noto Color Emoji font
-print("Downloading Noto Color Emoji font...")
-noto_url = 'https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf'
-noto_path = os.path.join('fonts', 'NotoColorEmoji.ttf')
+# Download Symbola font
+print("Downloading Symbola font...")
+symbola_url = 'https://raw.githubusercontent.com/ChiefMikeK/ttf-symbola/master/Symbola-13.otf'
+symbola_path = os.path.join('fonts', 'Symbola.ttf')
 
 try:
-    urllib.request.urlretrieve(noto_url, noto_path)
-    print("Downloaded Noto Color Emoji font")
+    # Download Symbola font directly
+    urllib.request.urlretrieve(symbola_url, symbola_path)
+    print("Downloaded Symbola font successfully")
 except Exception as e:
-    print(f"Error downloading Noto font: {e}")
+    print(f"Error downloading Symbola font: {e}")
 
-# Download and extract the zip file
+# Download and extract DejaVu Sans
 print("Downloading DejaVu fonts...")
 zip_url = 'https://downloads.sourceforge.net/project/dejavu/dejavu/2.37/dejavu-fonts-ttf-2.37.zip'
 temp_zip = tempfile.mktemp('.zip')
@@ -38,22 +27,31 @@ temp_zip = tempfile.mktemp('.zip')
 try:
     # Download zip file
     urllib.request.urlretrieve(zip_url, temp_zip)
-    print("Downloaded font package")
+    print("Downloaded DejaVu font package")
 
-    # Extract required files
+    # Extract only DejaVuSans.ttf
     with zipfile.ZipFile(temp_zip) as zip_ref:
         for zip_path in zip_ref.namelist():
-            if zip_path.endswith(('.ttf',)) and 'DejaVuSans' in zip_path:
-                filename = os.path.basename(zip_path)
-                print(f"Extracting {filename}...")
+            if zip_path.endswith('DejaVuSans.ttf'):
+                print("Extracting DejaVuSans.ttf...")
                 source = zip_ref.open(zip_path)
-                target = open(os.path.join('fonts', filename), "wb")
+                target = open(os.path.join('fonts', 'DejaVuSans.ttf'), "wb")
                 with source, target:
                     shutil.copyfileobj(source, target)
+                break
 
 finally:
     # Clean up
     if os.path.exists(temp_zip):
         os.remove(temp_zip)
+
+# Remove unused font files
+for file in os.listdir('fonts'):
+    if file not in ['DejaVuSans.ttf', 'Symbola.ttf']:
+        try:
+            os.remove(os.path.join('fonts', file))
+            print(f"Removed unused font: {file}")
+        except Exception as e:
+            print(f"Error removing {file}: {e}")
 
 print("Font installation complete!")

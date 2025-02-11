@@ -500,11 +500,14 @@ class ChatReport:
         self.y_position -= 5
         self.message_count += 1  # Increment for alternating backgrounds
 
+#pragma region is_image_file
+
     def is_image_file(self, filename):
         """Check if the filename has an image extension."""
         if not filename:
             return False
         return Path(filename).suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}
+#pragma endregion
 
     def is_audio_file(self, filename):
         """Check if the filename has an audio extension."""
