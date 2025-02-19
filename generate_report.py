@@ -795,179 +795,56 @@ class ChatReport:
         self.y_position -= self.line_height * 2
 
 def generate_chat_report(excel_file, output_file, verbose=False, model_name="medium"):
-    # Get the directory of the input Excel file and create output path
-    input_dir = os.path.dirname(os.path.abspath(excel_file))
-    base_name = os.path.splitext(os.path.basename(excel_file))[0]
-    output_file = os.path.join(input_dir, f"{base_name}_chat_report.pdf")
+    # Create reader and read data
+    from models import ExcelChatExportReader
+    reader = ExcelChatExportReader()
+    chat_data = reader.read(Path(excel_file))
     
-    # Read the Excel file
-    df = pd.read_excel(excel_file, na_values=[''], keep_default_na=False)
-    
-    # Count total messages at the start
-    total_messages = len(df.iloc[1:])
-    print(f"Total Messages: {total_messages}")
+    # Print initial statistics
+    print(f"Total Messages: {chat_data.message_count}")
     
     # Create PDF
     c = canvas.Canvas(output_file, pagesize=A4)
     report = ChatReport(verbose=verbose, model_name=model_name)
     
-    # Process the data to find owner and participants
-    participants_dict = {}
-
-    def parse_participant(participant_str):
-        """Parse participant string into chat ID and name."""
-        parts = participant_str.strip().split()
-        if len(parts) >= 2:
-            chat_id = parts[0]
-            name = ' '.join(parts[1:])
-            # Check if it's a valid chat ID (numeric)
-            if chat_id.isdigit():
-                return chat_id, name
-        return None, participant_str
-
-    # First pass: identify participants
-    for _, row in df.iloc[1:].iterrows():
-        # Check the From column (index 1) for participants
-        sender = str(row.iloc[1]).strip()
-        if sender and sender != 'nan' and sender != 'From' and sender != 'System Message System Message':
-            chat_id, name = parse_participant(sender)
-            if chat_id and name:
-                if chat_id not in participants_dict:
-                    participants_dict[chat_id] = {
-                        'chat_id': chat_id,
-                        'name': name,
-                        'is_owner': False,
-                        'message_direction': str(row.iloc[6]).strip()  # Direction column
-                    }
-
-    # Second pass: identify the owner and collect attachments
-    image_attachments = []  # Keep track of all image attachments
-    for _, row in df.iloc[1:].iterrows():
-        sender = str(row.iloc[1]).strip()
-        direction = str(row.iloc[6]).strip().lower()
-        attachment = str(row.iloc[25]).strip()  # Attachment #1 is in column 25
-        
-        if attachment and attachment != 'nan':
-            attachment_path = find_attachment_file(excel_file, attachment)
-            if attachment_path:
-                if Path(attachment_path).suffix.lower() in {'.jpg', '.jpeg', '.png', '.gif', '.bmp'}:
-                    image_attachments.append(attachment_path)
-        
-        if sender and sender != 'System Message System Message':
-            chat_id, _ = parse_participant(sender)
-            if chat_id and chat_id in participants_dict:
-                # Check if this is an outgoing message
-                if direction == 'outgoing':
-                    participants_dict[chat_id]['is_owner'] = True
-                    break
-
-    if image_attachments and verbose:
-        print(f"\nFound {len(image_attachments)} image attachments in chat:")
-        for img in image_attachments:
-            print(f"- {img}")
-    
-    # Convert participants_dict to list for header
-    participants = []
-    for info in participants_dict.values():
-        participants.append({
-            'sender_name': info['name'],
-            'is_owner': info['is_owner']
-        })
-    
     # Add participants header
-    report.add_participants_header(c, participants)
-    
-    # Process the messages
-    messages = []
-    for _, row in df.iloc[1:].iterrows():
-        from_field = str(row.iloc[1]).strip()
-        chat_id, name = parse_participant(from_field)
-        
-        if chat_id and chat_id in participants_dict:
-            # Get body content first
-            body_content = str(row.iloc[8]).strip()  # Body is in column 8
-            status = str(row.iloc[9]).strip()  # Status is in column 9
-            attachment = str(row.iloc[25]).strip()  # Attachment #1 is in column 25
-            
-            # Check for attachment if body is empty
-            if body_content == 'nan' or not body_content:
-                if attachment != 'nan' and attachment:
-                    attachment_path = find_attachment_file(excel_file, attachment)
-                    if attachment_path:
-                        body_content = ""  # Don't set body content, we'll display attachment separately
-                    else:
-                        body_content = f"[Missing Attachment: {attachment}]"
-                else:
-                    body_content = "[Empty message]"
-            
-            # Get timestamp from Timestamp-Time column
-            timestamp = str(row.iloc[18]).strip()
-            # Remove (UTC+0) if present
-            timestamp = timestamp.replace('(UTC+0)', '').strip()
-            # Check if timestamp contains a date
-            if '.' not in timestamp:
-                # If no date, get it from Timestamp-Date column
-                date = str(row.iloc[17]).strip()
-                if date != 'nan' and date:
-                    timestamp = f"{date} {timestamp}"
-            
-            # Check direction for owner detection
-            direction = str(row.iloc[6]).strip().lower()
-            is_owner = direction == 'outgoing'
-            
-            message_data = {
-                'sender_name': name,
-                'body': body_content,
-                'timestamp': timestamp,
-                'is_owner': is_owner,
-                'Status': status,
-                'attachment': attachment
-            }
-            
-            # Add full path to attachment if it exists
-            if attachment and attachment != 'nan':
-                attachment_path = find_attachment_file(excel_file, attachment)
-                if attachment_path:
-                    message_data['attachment_path'] = attachment_path
-                    # Wenn es eine Audio-Datei ist, füge Transkription hinzu
-                    if report.is_audio_file(attachment_path):
-                        transcription = report.transcribe_audio(attachment_path)
-                        message_data['audio_transcription'] = transcription
-            
-            messages.append(message_data)
-
-    # Initialisiere die erste Seite mit Seitennummer
-    report.add_page_number(c)
-    
-    # Sammle Teilnehmer und füge Excel-Pfad hinzu
-    participants = {
-        'excel_path': excel_file,
-        'participants': []
+    participants_data = {
+        'excel_path': str(chat_data.excel_path),
+        'participants': [
+            {'sender_name': p.name, 'is_owner': p.is_owner}
+            for p in chat_data.participants
+        ]
     }
-    seen = set()
-    for message in messages:
-        sender_name = message.get('sender_name')
-        if sender_name and sender_name not in seen:
-            seen.add(sender_name)
-            participants['participants'].append({
-                'sender_name': sender_name,
-                'is_owner': message.get('is_owner', False)
-            })
-
-    # Füge Teilnehmerliste hinzu
-    report.add_participants_header(c, participants)
-
+    report.add_participants_header(c, participants_data)
+    
     # Process each message
-    for message in messages:
-        report.add_chat_line(c, message)
+    for msg in chat_data.messages:
+        message_data = {
+            'sender_name': msg.sender.name,
+            'body': msg.body or '[Empty message]',
+            'timestamp': msg.timestamp.strftime('%d.%m.%Y %H:%M:%S'),
+            'is_owner': msg.sender.is_owner,
+            'Status': msg.status
+        }
+        
+        # Handle attachment if present
+        if msg.attachment:
+            message_data['attachment'] = msg.attachment.filename
+            if msg.attachment.full_path:
+                message_data['attachment_path'] = str(msg.attachment.full_path)
+                if msg.attachment.type == 'audio' and msg.attachment.transcription:
+                    message_data['audio_transcription'] = msg.attachment.transcription
+        
+        report.add_chat_line(c, message_data)
     
     # Save the PDF
     c.save()
-
+    
     # Print attachment statistics
-    print(f"Attachments found: {attachment_found_counter}")
-    if attachment_not_found_counter > 0:
-        print(f"Attachments not found: {attachment_not_found_counter}")
+    stats = chat_data.attachment_stats
+    print(f"Attachments found: {stats['found']}")
+    if stats['not_found'] > 0:
+        print(f"Attachments not found: {stats['not_found']}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate PDF report from chat export Excel file.')
