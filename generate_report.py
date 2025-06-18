@@ -11,20 +11,55 @@ import os
 import argparse
 import sys
 import math
-import whisper
-import torch
-from pydub import AudioSegment
-from moviepy.editor import VideoFileClip
+import traceback
+# Audio/Video imports deaktiviert, um PyAudio-Abhängigkeit zu vermeiden
+# import whisper
+# import torch
+# from pydub import AudioSegment
+# from moviepy.editor import VideoFileClip
 import tempfile
+
+# Import der neuen Excel-Reader-Funktionalität
+from excel_reader import read_excel_file, generate_statistics, is_url
 
 # Global counters
 attachment_not_found_counter = 0
 attachment_found_counter = 0
 
+def parse_participant(from_field):
+    """
+    Extrahiert Chat-ID und Namen aus dem From-Feld.
+    Format ist typischerweise: "Name (ID)" oder nur "Name".
+    """
+    if not from_field or from_field == 'nan':
+        return None, None
+        
+    # Suche nach dem Muster "Name (ID)"
+    match = re.search(r'(.+?)\s*\(([^)]+)\)', from_field)
+    if match:
+        name = match.group(1).strip()
+        chat_id = match.group(2).strip()
+        return chat_id, name
+    else:
+        # Wenn kein Muster gefunden wurde, verwende das gesamte Feld als Namen
+        return from_field, from_field
+
+# Sichere Funktion zum Abrufen von Zellwerten aus einer DataFrame-Zeile
+def safe_get_cell(row, idx, default='', verbose=False):
+    try:
+        if idx < len(row):
+            value = str(row.iloc[idx]).strip()
+            return value if value != 'nan' else default
+        return default
+    except Exception as e:
+        if verbose:
+            print(f"Fehler beim Lesen der Zelle {idx}: {e}")
+        return default
+
 def find_attachment_file(excel_path, attachment_name):
     """
-    Search for an attachment file in the 'files' directory parallel to the Excel file.
-    Returns the full path if found, None otherwise.
+    Search for an attachment file in multiple directories parallel to the Excel file.
+    Returns the full path if found, "URL" if it's a URL, None otherwise.
     """
     global attachment_not_found_counter
     global attachment_found_counter
@@ -32,23 +67,31 @@ def find_attachment_file(excel_path, attachment_name):
     #print(f"Searching for attachment: {attachment_name}")
     if not attachment_name or attachment_name == 'nan':
         return None
+    
+    # Prüfe, ob es sich um eine URL handelt
+    if is_url(attachment_name):
+        return "URL"
         
     # Get the directory containing the Excel file
     excel_dir = Path(excel_path).parent
-    # Construct path to the files directory
-    files_dir = excel_dir / 'files'
     
-    if not files_dir.exists():
-        attachment_not_found_counter += 1
-        #print(f"Warning: files directory not found at {files_dir}")
-        return None
+    # Verzeichnisse für Dateianhänge
+    search_dirs = [
+        excel_dir / 'files',                     # Standard-Verzeichnis
+        excel_dir / 'instant_messages',          # Unterverzeichnis 'instant_messages'
+        excel_dir                                # Hauptverzeichnis
+    ]
     
-    # Walk through all subdirectories
-    for root, _, files in os.walk(files_dir):
-        for file in files:
-            if file == attachment_name:
+    # Suche in allen möglichen Verzeichnissen
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+            
+        # Suche nach der Datei in allen Unterverzeichnissen
+        for root, _, files in os.walk(search_dir):
+            if attachment_name in files:
                 attachment_found_counter += 1
-                return os.path.join(root, file)
+                return os.path.join(root, attachment_name)
     
     attachment_not_found_counter += 1
     #print(f"Warning: Attachment not found: {attachment_name}")
@@ -67,18 +110,12 @@ class ChatReport:
         self.verbose = verbose
         self.model_name = model_name  # Whisper model name
 
-        # Load Whisper model at initialization
-        print(f"Loading Whisper model '{self.model_name}'...")
-        self._whisper_model = whisper.load_model(self.model_name)
+        # Whisper model loading deaktiviert
+        print(f"Audio transcription disabled - Whisper model '{self.model_name}' not loaded")
+        self._whisper_model = None
         
-        # Get device information
-        device_info = "CPU"
-        if torch.cuda.is_available():
-            device_info = f"GPU ({torch.cuda.get_device_name(0)})"
-        elif torch.backends.mps.is_available():
-            device_info = "Apple Silicon"
-        
-        print(f"Successfully loaded on: {device_info}")
+        # Device information
+        print("Audio transcription disabled - no device needed")
         
         # Register fonts
         font_path = Path(__file__).parent / 'fonts'
@@ -170,22 +207,31 @@ class ChatReport:
                 print(f"Found attachment: {attachment}")
                 print(f"Attachment path: {attachment_path}")
                 
-                # Konvertiere zu absolutem Pfad und prüfe Existenz
-                abs_attachment_path = str(Path(attachment_path).resolve())
-                if not os.path.exists(abs_attachment_path):
-                    print(f"WARNING: File does not exist:")
-                    print(f"  Relative path: {attachment_path}")
-                    print(f"  Absolute path: {abs_attachment_path}")
-                    attachment_path = None
+                # Prüfe, ob es sich um eine URL handelt
+                if attachment_path == "URL":
+                    print(f"Type: URL")
+                    # Für URLs keine weiteren Prüfungen durchführen
                 else:
-                    if self.is_image_file(attachment_path):
-                        print(f"Type: Image")
-                    elif self.is_audio_file(attachment_path):
-                        print(f"Type: Audio")
-                    elif self.is_video_file(attachment_path):
-                        print(f"Type: Video")
-                    else:
-                        print(f"Type: Unknown")
+                    # Konvertiere zu absolutem Pfad und prüfe Existenz
+                    try:
+                        abs_attachment_path = str(Path(attachment_path).resolve())
+                        if not os.path.exists(abs_attachment_path):
+                            print(f"WARNING: File does not exist:")
+                            print(f"  Relative path: {attachment_path}")
+                            print(f"  Absolute path: {abs_attachment_path}")
+                            attachment_path = None
+                        else:
+                            if self.is_image_file(attachment_path):
+                                print(f"Type: Image")
+                            elif self.is_audio_file(attachment_path):
+                                print(f"Type: Audio")
+                            elif self.is_video_file(attachment_path):
+                                print(f"Type: Video")
+                            else:
+                                print(f"Type: Unknown")
+                    except:
+                        print(f"WARNING: Invalid attachment path: {attachment_path}")
+                        attachment_path = None
  
             
         # Calculate positions
@@ -227,7 +273,11 @@ class ChatReport:
             
         # Berechne zusätzliche Höhe für Anhänge
         if attachment and attachment != 'nan':
-            if self.is_image_file(attachment_path):
+            # Spezialfall: URL
+            if attachment_path == "URL":
+                # Für URLs nur eine Zeile reservieren
+                total_height += 20
+            elif self.is_image_file(attachment_path):
                 try:
                     img = Image.open(attachment_path)
                     img_width, img_height = img.size
@@ -243,6 +293,31 @@ class ChatReport:
                 except:
                     total_height += 10
             elif self.is_audio_file(attachment_path):
+                # Prüfe ob eine Transkription existiert
+                transcription, is_video = self.transcribe_audio(attachment_path)
+                if transcription:
+                    # Höhe für Header und Abstand
+                    total_height += 20
+                    # Berechne Höhe für Transkriptionstext
+                    words = str(transcription).split()
+                    current_line = ""
+                    num_lines = 0
+                    
+                    for word in words:
+                        test_line = current_line + " " + word if current_line else word
+                        width = self.calculate_text_width(canvas, test_line)
+                        if width > 200:
+                            num_lines += 1
+                            current_line = word
+                        else:
+                            current_line = test_line
+                    if current_line:
+                        num_lines += 1
+                    # Transkriptionstext + Abstand nach unten
+                    total_height += num_lines * 12 + 15
+                else:
+                    total_height += 10
+            elif self.is_video_file(attachment_path):
                 # Prüfe ob eine Transkription existiert
                 transcription, is_video = self.transcribe_audio(attachment_path)
                 if transcription:
@@ -389,6 +464,12 @@ class ChatReport:
                                                   max_content_width)  # Pass max width
                     if image_height > 0:
                         y_offset += image_height + 5
+                elif attachment_path == "URL":
+                    # Zeige URL mit Link-Symbol an
+                    y_offset += 5
+                    canvas.setFont('DejaVuSans', 8)
+                    canvas.drawString(middle_col, self.y_position - y_offset, f"Link: {attachment}")
+                    y_offset += 10
                 elif self.is_audio_file(attachment_path) or self.is_video_file(attachment_path):
                     # Transcribe audio/video and display result
                     if self.verbose:
@@ -418,8 +499,14 @@ class ChatReport:
                             y_offset += 12
                     else:
                         canvas.setFont('DejaVuSans', 8)
-                        canvas.drawString(middle_col, self.y_position - y_offset, f"🎵 [Audio: {attachment}] (Transcription failed)")
+                        canvas.drawString(middle_col, self.y_position - y_offset, f"[Audio: {attachment}] (Transcription failed)")
                         y_offset += 10
+                elif attachment_path == "URL":
+                    # Zeige URL mit Link-Symbol an
+                    y_offset += 5
+                    canvas.setFont('DejaVuSans', 8)
+                    canvas.drawString(middle_col, self.y_position - y_offset, f"Link: {attachment}")
+                    y_offset += 10
                 else:
                     # Display attachment name in smaller font
                     canvas.setFont('DejaVuSans', 8)
@@ -466,6 +553,12 @@ class ChatReport:
                                                   max_content_width)  # Pass max width
                     if image_height > 0:
                         y_offset += image_height + 5
+                elif attachment_path == "URL":
+                    # Zeige URL mit Link-Symbol an
+                    y_offset += 5
+                    canvas.setFont('DejaVuSans', 8)
+                    canvas.drawString(middle_col, self.y_position - y_offset, f"Link: {attachment}")
+                    y_offset += 10
                 elif self.is_audio_file(attachment_path) or self.is_video_file(attachment_path):
                     # Transcribe audio/video and display result
                     if self.verbose:
@@ -537,79 +630,12 @@ class ChatReport:
         return Path(filename).suffix.lower() in {'.mp4', '.avi', '.mov', '.mkv'}
         
     def extract_audio_from_video(self, video_path):
-        """Extract audio from video file and return path to temporary audio file."""
-        if not video_path:
-            return None, False
-            
-        # Konvertiere zu absolutem Pfad
-        abs_video_path = str(Path(video_path).resolve())
-        
-        # Prüfe ob die Datei existiert
-        if not os.path.exists(abs_video_path):
-            if self.verbose:
-                print(f"Video file does not exist: {abs_video_path}")
-            return None, False
-            
+        """Extract audio from video file and return path to temporary audio file.
+        DEAKTIVIERT: Gibt immer None, False zurück, um PyAudio-Abhängigkeit zu vermeiden.
+        """
         if self.verbose:
-            print(f"Processing media file: {abs_video_path}")
-            print(f"File exists: {os.path.exists(abs_video_path)}")
-            
-        # Versuche die Datei als Audio-only MP4 zu öffnen
-        try:
-            audio = AudioSegment.from_file(abs_video_path)
-            if self.verbose:
-                print("Successfully loaded as audio file")
-            # Erstelle temporäre WAV-Datei
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
-                audio.export(temp_audio.name, format='wav')
-                return temp_audio.name, True
-        except Exception as audio_error:
-            if self.verbose:
-                print(f"Not an audio-only file, trying as video: {audio_error}")
-                
-        # Wenn es keine Audio-Datei ist, versuche es als Video
-        try:
-            # Versuche das Video zu laden
-            try:
-                video = VideoFileClip(abs_video_path)
-                if self.verbose:
-                    print(f"Video Size: {video.size}")
-                    print(f"Video Duration: {video.duration}")
-            except Exception as e:
-                if 'video_fps' in str(e):
-                    if self.verbose:
-                        print("Retrying with fps=30...")
-                    # Wenn FPS nicht erkannt werden können, setze sie auf 30
-                    video = VideoFileClip(abs_video_path, fps_source='fps')
-                else:
-                    raise e
-            
-            # Prüfe auf Audiospur
-            audio = video.audio
-            if audio is None:
-                if self.verbose:
-                    print(f"No audio track found in video: {Path(video_path).name}")
-                video.close()
-                return None, False
-                
-            # Erstelle temporäre WAV-Datei
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
-                if self.verbose:
-                    print(f"Converting video to audio: {temp_audio.name}")
-                audio.write_audiofile(temp_audio.name, verbose=self.verbose, logger=None)
-                video.close()
-                if self.verbose:
-                    print("Audio extraction completed successfully")
-                return temp_audio.name, True
-                
-        except Exception as e:
-            if self.verbose:
-                print(f"Error extracting audio from video: {e}")
-            try:
-                video.close()
-            except:
-                pass
-            return None, False
+            print(f"Audio extraction disabled for: {video_path}")
+        return None, False
 
     def get_transcription_path(self, audio_path):
         """Get the path for the transcription file."""
@@ -653,64 +679,12 @@ class ChatReport:
             print(f"Error saving transcription: {e}")
 
     def transcribe_audio(self, file_path):
-        """Transcribe audio or video file using Whisper, with caching."""
-        if not file_path or not os.path.exists(file_path):
-            print(f"File not found: {file_path}")
-            return None, False
-            
-        # Bestimme den Pfad für die Transkription
-        trans_path = self.get_transcription_path(file_path)
-        
-        # Prüfe auf Cache
-        cached_text = self.load_cached_transcription(trans_path)
-        if cached_text is not None:
-            if self.verbose:
-                print(f"Using cached transcription for {Path(file_path).name}")
-            return cached_text, False
-            
-        try:
-            # Behandle Videos speziell
-            if self.is_video_file(file_path):
-                if self.verbose:
-                    print(f"Processing video file: {Path(file_path).name}")
-                temp_audio_result = self.extract_audio_from_video(file_path)
-                if temp_audio_result is None or temp_audio_result[0] is None:
-                    return None, False
-                audio_path = temp_audio_result[0]  # Nur den Pfad verwenden, nicht das Tupel
-            else:
-                audio_path = file_path
-                
-            if self.verbose:
-                print(f"Transcribing {Path(file_path).name}...")
-                
-            # Convert non-WAV files to WAV using pydub if needed
-            if not self.is_video_file(file_path) and Path(audio_path).suffix.lower() != '.wav':
-                audio = AudioSegment.from_file(audio_path)
-                with tempfile.NamedTemporaryFile(suffix='.wav', delete=True) as temp_wav:
-                    audio.export(temp_wav.name, format='wav')
-                    result = self._whisper_model.transcribe(temp_wav.name)
-            else:
-                result = self._whisper_model.transcribe(audio_path)
-
-            transcribed_text = result['text'].strip()
-            
-            # Cache the transcription
-            self.save_transcription(trans_path, transcribed_text)
-            
-            # Cleanup temporary audio file if it was a video
-            if self.is_video_file(file_path) and audio_path != file_path:
-                try:
-                    os.unlink(audio_path)
-                except Exception as e:
-                    if self.verbose:
-                        print(f"Warning: Could not delete temporary audio file: {e}")
-            
-            is_video = self.is_video_file(file_path)
-            return transcribed_text, is_video
-            
-        except Exception as e:
-            print(f"Error transcribing {Path(file_path).name}: {e}")
-            return None, False
+        """Transcribe audio or video file using Whisper, with caching.
+        DEAKTIVIERT: Gibt immer None, False zurück, um PyAudio-Abhängigkeit zu vermeiden.
+        """
+        if self.verbose:
+            print(f"Audio transcription disabled for: {file_path}")
+        return None, False
     
     def embed_image(self, canvas, image_path, x, y, max_height, max_width):
         """Embed an image in the PDF with maximum height and width constraints."""
@@ -794,29 +768,7 @@ class ChatReport:
         canvas.line(self.margin, self.y_position, self.page_width - self.margin, self.y_position)
         self.y_position -= self.line_height * 2
 
-def generate_chat_report(excel_file, output_file, verbose=False, model_name="medium"):
-    # Get the directory of the input Excel file and create output path
-    input_dir = os.path.dirname(os.path.abspath(excel_file))
-    base_name = os.path.splitext(os.path.basename(excel_file))[0]
-    output_file = os.path.join(input_dir, f"{base_name}_chat_report.pdf")
-    
-    # Read the Excel file
-    df = pd.read_excel(excel_file, na_values=[''], keep_default_na=False)
-    
-    # Count total messages at the start
-    total_messages = len(df.iloc[1:])
-    print(f"Total Messages: {total_messages}")
-    
-    # Create PDF
-    c = canvas.Canvas(output_file, pagesize=A4)
-    report = ChatReport(verbose=verbose, model_name=model_name)
-    
-    # Process the data to find owner and participants
-    participants_dict = {}
-
-    def parse_participant(participant_str):
-        """Parse participant string into chat ID and name."""
-        parts = participant_str.strip().split()
+# Diese Funktion wird nicht mehr verwendet und wurde durch die neue Version unten ersetzt
         if len(parts) >= 2:
             chat_id = parts[0]
             name = ' '.join(parts[1:])
@@ -969,19 +921,275 @@ def generate_chat_report(excel_file, output_file, verbose=False, model_name="med
     if attachment_not_found_counter > 0:
         print(f"Attachments not found: {attachment_not_found_counter}")
 
+def generate_chat_report(excel_file, output_file='chat_report.pdf', verbose=False, model_name="medium"):
+    """Generate a PDF report from the Excel file."""
+    global attachment_found_counter, attachment_not_found_counter
+    
+    # Reset counters
+    attachment_found_counter = 0
+    attachment_not_found_counter = 0
+    
+    try:
+        # Lese die Excel-Datei
+        df, metadata = read_excel_file(excel_file)
+        
+        if df is None:
+            print("Fehler: Die Excel-Datei konnte nicht gelesen werden.")
+            return
+            
+        if verbose:
+            print(f"Generiere PDF-Report: {output_file}")
+            print(f"Excel-Datei: {excel_file}")
+            print(f"Whisper-Modell: {model_name}")
+            print(f"DataFrame Spalten: {len(df.columns)}")
+            print(f"DataFrame Zeilen: {len(df)}")
+            
+        # Initialisiere den PDF-Report
+        c = canvas.Canvas(output_file, pagesize=A4)
+        report = ChatReport(verbose=verbose, model_name=model_name)
+        
+        # Spaltenindizes bestimmen (mit Fallback-Werten)
+        from_col_idx = 1  # Standard: Spalte 1 für 'From'
+        body_col_idx = 8  # Standard: Spalte 8 für 'Body'
+        status_col_idx = 9  # Standard: Spalte 9 für 'Status'
+        date_col_idx = 17  # Standard: Spalte 17 für 'Timestamp-Date'
+        time_col_idx = 18  # Standard: Spalte 18 für 'Timestamp-Time'
+        direction_col_idx = 6  # Standard: Spalte 6 für 'Direction'
+        attachment_col_idx = 25  # Standard: Spalte 25 für 'Attachment #1'
+    
+        # Sichere Funktion zum Abrufen von Zellwerten innerhalb der generate_chat_report-Funktion
+        def safe_get_cell_local(row, idx, default=''):
+            try:
+                if idx < len(row):
+                    value = str(row.iloc[idx]).strip()
+                    return value if value != 'nan' else default
+                return default
+            except Exception as e:
+                if verbose:
+                    print(f"Fehler beim Lesen der Zelle {idx}: {e}")
+                return default
+                
+        # Überprüfe die Spaltenanzahl und passe die Indizes an
+        if len(df.columns) <= attachment_col_idx:
+            # Wenn weniger Spalten vorhanden sind, suche nach Spalten mit bestimmten Namen
+            if verbose:
+                print("Spaltenanzahl kleiner als erwartet, suche nach Spalten anhand der Namen...")
+                
+            for i, col_name in enumerate(df.columns):
+                col_name_lower = str(col_name).lower()
+                if 'from' in col_name_lower:
+                    from_col_idx = i
+                    if verbose:
+                        print(f"'From'-Spalte gefunden: {i}")
+                elif 'body' in col_name_lower:
+                    body_col_idx = i
+                    if verbose:
+                        print(f"'Body'-Spalte gefunden: {i}")
+                elif 'status' in col_name_lower:
+                    status_col_idx = i
+                    if verbose:
+                        print(f"'Status'-Spalte gefunden: {i}")
+                elif 'date' in col_name_lower:
+                    date_col_idx = i
+                    if verbose:
+                        print(f"'Date'-Spalte gefunden: {i}")
+                elif 'time' in col_name_lower:
+                    time_col_idx = i
+                    if verbose:
+                        print(f"'Time'-Spalte gefunden: {i}")
+                elif 'direction' in col_name_lower:
+                    direction_col_idx = i
+                    if verbose:
+                        print(f"'Direction'-Spalte gefunden: {i}")
+                elif 'attachment' in col_name_lower:
+                    attachment_col_idx = i
+                    if verbose:
+                        print(f"'Attachment'-Spalte gefunden: {i}")
+                
+    if verbose:
+        print(f"Verwendete Spaltenindizes:")
+        print(f"  From: {from_col_idx}")
+        print(f"  Body: {body_col_idx}")
+        print(f"  Status: {status_col_idx}")
+        print(f"  Date: {date_col_idx}")
+        print(f"  Time: {time_col_idx}")
+        print(f"  Direction: {direction_col_idx}")
+        print(f"  Attachment: {attachment_col_idx}")
+    
+    # Parse participants
+    participants_dict = {}
+    image_attachments = []
+    
+    # Iterate through rows to find participants
+    for _, row in df.iloc[1:].iterrows():
+        try:
+            from_field = safe_get_cell(row, from_col_idx)
+            chat_id, name = parse_participant(from_field)
+            
+            if chat_id and chat_id not in participants_dict:
+                participants_dict[chat_id] = {
+                    'name': name,
+                    'is_owner': False
+                }
+            
+            # Check for attachments
+            attachment = safe_get_cell(row, attachment_col_idx)
+            if attachment != 'nan' and attachment:
+                attachment_path = find_attachment_file(excel_file, attachment)
+                if attachment_path and report.is_image_file(attachment_path):
+                    image_attachments.append(attachment_path)
+            
+            # Check for owner
+            direction = safe_get_cell(row, direction_col_idx).lower()
+            
+            if direction == 'outgoing':
+                if chat_id and chat_id in participants_dict:
+                    participants_dict[chat_id]['is_owner'] = True
+        except Exception as e:
+            if verbose:
+                print(f"Fehler bei der Verarbeitung einer Zeile: {e}")
+    
+    if image_attachments and verbose:
+        print(f"\nFound {len(image_attachments)} image attachments in chat:")
+        for img in image_attachments:
+            print(f"- {img}")
+    
+    # Convert participants_dict to list for header
+    participants = []
+    for info in participants_dict.values():
+        participants.append({
+            'sender_name': info['name'],
+            'is_owner': info['is_owner']
+        })
+    
+    # Add participants header
+    report.add_participants_header(c, participants)
+    
+    # Process the messages
+    messages = []
+    for _, row in df.iloc[1:].iterrows():
+        from_field = str(row.iloc[1]).strip()
+        chat_id, name = parse_participant(from_field)
+        
+        if chat_id and chat_id in participants_dict:
+            # Get body content first
+            body_content = str(row.iloc[8]).strip()  # Body is in column 8
+            status = str(row.iloc[9]).strip()  # Status is in column 9
+            attachment = str(row.iloc[25]).strip()  # Attachment #1 is in column 25
+            
+            # Check for attachment if body is empty
+            if body_content == 'nan' or not body_content:
+                if attachment != 'nan' and attachment:
+                    attachment_path = find_attachment_file(excel_file, attachment)
+                    if attachment_path:
+                        body_content = ""  # Don't set body content, we'll display attachment separately
+                    else:
+                        body_content = f"[Missing Attachment: {attachment}]"
+                else:
+                    body_content = "[Empty message]"
+            
+            # Get timestamp from Timestamp-Time column
+            timestamp = str(row.iloc[18]).strip()
+            # Remove (UTC+0) if present
+            timestamp = timestamp.replace('(UTC+0)', '').strip()
+            # Check if timestamp contains a date
+            if '.' not in timestamp:
+                # If no date, get it from Timestamp-Date column
+                date = str(row.iloc[17]).strip()
+                if date != 'nan' and date:
+                    timestamp = f"{date} {timestamp}"
+            
+            # Check direction for owner detection
+            direction = str(row.iloc[6]).strip().lower()
+            is_owner = direction == 'outgoing'
+            
+            message_data = {
+                'sender_name': name,
+                'body': body_content,
+                'timestamp': timestamp,
+                'is_owner': is_owner,
+                'Status': status,
+                'attachment': attachment
+            }
+            
+            # Add full path to attachment if it exists
+            if attachment and attachment != 'nan':
+                attachment_path = find_attachment_file(excel_file, attachment)
+                if attachment_path:
+                    message_data['attachment_path'] = attachment_path
+                    # Wenn es eine Audio-Datei ist, füge Transkription hinzu
+                    if report.is_audio_file(attachment_path):
+                        transcription = report.transcribe_audio(attachment_path)
+                        message_data['audio_transcription'] = transcription
+            
+            messages.append(message_data)
+    
+    # Initialisiere die erste Seite mit Seitennummer
+    report.add_page_number(c)
+    
+    # Sammle Teilnehmer und füge Excel-Pfad hinzu
+    participants = {
+        'excel_path': excel_file,
+        'participants': []
+    }
+    seen = set()
+    for message in messages:
+        sender_name = message.get('sender_name')
+        if sender_name and sender_name not in seen:
+            seen.add(sender_name)
+            participants['participants'].append({
+                'sender_name': sender_name,
+                'is_owner': message.get('is_owner', False)
+            })
+    
+    # Füge Teilnehmerliste hinzu
+    report.add_participants_header(c, participants)
+    
+    # Process each message
+    for message in messages:
+        report.add_chat_line(c, message)
+    
+    # Save the PDF mit dem angegebenen Ausgabepfad
+    c.save()
+    
+    # Print attachment statistics
+    print(f"Attachments found: {attachment_found_counter}")
+    if attachment_not_found_counter > 0:
+        print(f"Attachments not found: {attachment_not_found_counter}")
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Generate PDF report from chat export Excel file.')
-    parser.add_argument('excel_file', type=str, help='Path to the input Excel file')
+    parser = argparse.ArgumentParser(description='Analysiere WhatsApp-Export Excel-Datei und generiere optional einen PDF-Report.')
+    parser.add_argument('excel_file', type=str, help='Pfad zur Excel-Datei')
+    parser.add_argument('--export', '-e', action='store_true',
+                       help='PDF-Report generieren (standardmäßig wird nur die Statistik angezeigt)')
     parser.add_argument('--output', '-o', type=str, default='chat_report.pdf',
-                       help='Path to the output PDF file (default: chat_report.pdf)')
+                       help='Pfad zur Ausgabe-PDF-Datei (Standard: chat_report.pdf)')
     parser.add_argument('-v', '--verbose', action='store_true',
-                       help='Enable verbose output')
+                       help='Ausführliche Ausgabe aktivieren')
     parser.add_argument('--model', '-m', type=str, default='medium',
                        choices=['tiny', 'base', 'small', 'medium', 'large'],
-                       help='Whisper model to use for transcription (default: medium)')
+                       help='Whisper-Modell für die Transkription (Standard: medium)')
     
     args = parser.parse_args()
     
-    # Generate the report
-    generate_chat_report(args.excel_file, args.output, args.verbose, args.model)
-    print(f"PDF report has been generated: {args.output}")
+    # Überprüfe, ob die Excel-Datei existiert
+    if not os.path.exists(args.excel_file):
+        print(f"Fehler: Die Datei '{args.excel_file}' existiert nicht.")
+        sys.exit(1)
+    
+    # Lese die Excel-Datei mit der neuen Funktion
+    df, metadata = read_excel_file(args.excel_file)
+    
+    if df is None:
+        print("Fehler: Die Excel-Datei konnte nicht gelesen werden.")
+        sys.exit(1)
+    
+    # Zeige Statistiken an (immer)
+    stats = generate_statistics(df, metadata, args.excel_file, args.verbose)
+    print(stats)
+    
+    # Wenn PDF-Report generiert werden soll
+    if args.export:
+        print("\nGeneriere PDF-Report...")
+        generate_chat_report(args.excel_file, args.output, args.verbose, args.model)
+        print(f"PDF-Report wurde generiert: {args.output}")
